@@ -11,7 +11,7 @@ A **production-grade MLOps project** demonstrating end-to-end best practices for
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────┐    ┌──────────────────────────────────────────────────────┐
@@ -42,7 +42,7 @@ A **production-grade MLOps project** demonstrating end-to-end best practices for
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 mlops-pipeline/
@@ -94,19 +94,22 @@ mlops-pipeline/
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone & Setup Environment
 
 ```bash
-git clone <your-repo-url>
-cd mlops-pipeline
+git clone https://github.com/vinayak-ktp/time-series-ensemble.git
+cd time-series-ensemble
+
+# Create virtual environment
+python -m venv venv
 
 # Activate virtual environment
 source venv/bin/activate
 
-# (Already installed) Verify dependencies
-pip list | grep -E "mlflow|dvc|fastapi|lightgbm"
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ### 2. Initialize DVC & Git
@@ -151,7 +154,7 @@ uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 📡 API Endpoints
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -194,7 +197,7 @@ Response:
 
 ---
 
-## 🐳 Docker
+## Docker
 
 ### Run with Docker Compose
 
@@ -221,7 +224,7 @@ docker build -f docker/Dockerfile.train -t mlops-train:latest .
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests with coverage
@@ -235,7 +238,7 @@ pytest tests/test_ensemble.py -v
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 All hyperparameters live in `params.yaml`. To run an experiment with different settings:
 
@@ -260,7 +263,7 @@ Key parameters:
 
 ---
 
-## 🔄 CI/CD Pipeline
+## CI/CD Pipeline
 
 GitHub Actions runs on every push/PR:
 
@@ -279,7 +282,7 @@ pre-commit run --all-files
 
 ---
 
-## 📊 Dataset
+## Dataset
 
 **ETTh1** — Electricity Transformer Temperature (Hourly)
 - **Source**: [Zhou et al., 2021](https://github.com/zhouhaoyi/ETDataset)
@@ -290,23 +293,23 @@ pre-commit run --all-files
 
 ---
 
-## 📈 MLflow Experiment Tracking
+## MLflow Experiment Tracking
 
 Each `dvc repro` creates a nested MLflow run:
 
 ```
-📁 experiment: mlops-timeseries-ensemble
-   └── 🏃 run: ensemble_training
-       ├── 🏃 nested: arima       (params + metrics)
-       ├── 🏃 nested: prophet     (params + metrics)
-       ├── 🏃 nested: lgbm        (params + metrics)
-       ├── 🏃 nested: xgboost     (params + metrics)
-       └── 📊 ensemble metrics + weights + artifacts
+experiment: mlops-timeseries-ensemble
+  └── run: ensemble_training
+      ├── nested: arima       (params + metrics)
+      ├── nested: prophet     (params + metrics)
+      ├── nested: lgbm        (params + metrics)
+      ├── nested: xgboost     (params + metrics)
+      └── ensemble metrics + weights + artifacts
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|

@@ -22,7 +22,7 @@ stages:
       - base.val_size
       - base.target_col
       - base.datetime_col
-      - base.horizon
+      - data.horizon
     outs:
       - data/processed/train.csv
       - data/processed/val.csv

@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PredictRequest(BaseModel):
@@ -16,6 +16,8 @@ class PredictRequest(BaseModel):
 
 
 class ForecastPoint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     datetime: str
     prediction: float
     arima: Optional[float] = None
@@ -25,6 +27,8 @@ class ForecastPoint(BaseModel):
 
 
 class PredictResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     model: str
     steps: int
     forecast: List[ForecastPoint]
