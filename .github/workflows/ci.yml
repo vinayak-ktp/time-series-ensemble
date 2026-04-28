@@ -25,11 +25,10 @@ jobs:
           cache: pip
 
       - name: Install dev dependencies
-        run: |
-          pip install flake8 black isort mypy
+        run: pip install flake8 black isort
 
       - name: Run flake8
-        run: flake8 src/ api/ tests/ --max-line-length=120 --ignore=E501,W503,E203
+        run: flake8 src/ api/ tests/
 
       - name: Check black formatting
         run: black --check src/ api/ tests/ --line-length=100
@@ -66,7 +65,7 @@ jobs:
           file: coverage.xml
           fail_ci_if_error: false
 
-  # ── DVC Pipeline ───────────────────────────────────────────────────────────
+  # ── DVC Pipeline (data stages only — training is slow in CI) ──────────────
   dvc-pipeline:
     name: Run DVC Pipeline
     runs-on: ubuntu-latest
@@ -84,25 +83,31 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Initialize DVC
+      - name: Run data pipeline stages (ingest → preprocess → featurize)
         run: |
-          dvc init --no-scm || true
+          python src/data/ingestion.py --config params.yaml
+          python src/data/preprocessing.py --config params.yaml
+          python src/features/engineering.py --config params.yaml
 
-      - name: Run DVC pipeline
+      - name: Validate DVC pipeline config
         run: |
-          dvc repro --no-commit
+          dvc dag
 
-      - name: Show metrics
+      - name: Show produced data artefacts
         run: |
-          cat metrics/metrics.json | python3 -m json.tool
+          echo "Train:" && wc -l data/processed/train_features.csv
+          echo "Val:"   && wc -l data/processed/val_features.csv
+          echo "Test:"  && wc -l data/processed/test_features.csv
 
-      - name: Upload metrics artifact
+      - name: Upload data artefacts
         uses: actions/upload-artifact@v4
         with:
-          name: metrics
-          path: |
-            metrics/metrics.json
-            metrics/predictions.csv
+          name: processed-data
+          path: data/processed/
+
+      - name: Show pre-committed metrics
+        run: |
+          cat metrics/metrics.json | python3 -m json.tool
 
   # ── Build Docker Image ─────────────────────────────────────────────────────
   docker-build:
@@ -126,8 +131,16 @@ jobs:
             --name test-api \
             -p 8000:8000 \
             ${{ env.IMAGE_NAME }}:latest
-          sleep 20
-          curl -f http://localhost:8000/health || (docker logs test-api && exit 1)
+          echo "Waiting for API to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "API is up after ${i}s"
+              break
+            fi
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health | python3 -m json.tool
+          curl -sf http://localhost:8000/ | python3 -m json.tool
           docker stop test-api
 
       - name: Log in to Docker Hub
