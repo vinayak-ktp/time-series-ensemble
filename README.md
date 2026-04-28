@@ -1,6 +1,6 @@
 # MLOps Time Series Ensemble Pipeline
 
-[![CI/CD](https://github.com/yourusername/mlops-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/mlops-pipeline/actions)
+[![CI/CD](https://github.com/vinayak-ktp/time-series-ensemble/actions/workflows/ci.yml/badge.svg)](https://github.com/vinayak-ktp/time-series-ensemble/actions)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
 [![MLflow](https://img.shields.io/badge/MLflow-tracking-orange.svg)](https://mlflow.org)
 [![DVC](https://img.shields.io/badge/DVC-pipeline-945DD6.svg)](https://dvc.org)
