@@ -1,0 +1,73 @@
+stages:
+  ingest:
+    cmd: python src/data/ingestion.py --config params.yaml
+    deps:
+      - src/data/ingestion.py
+    params:
+      - data.raw_path
+      - base.target_col
+      - base.datetime_col
+    outs:
+      - data/raw/ETTh1.csv
+
+  preprocess:
+    cmd: python src/data/preprocessing.py --config params.yaml
+    deps:
+      - src/data/preprocessing.py
+      - data/raw/ETTh1.csv
+    params:
+      - data
+      - base.random_seed
+      - base.test_size
+      - base.val_size
+      - base.target_col
+      - base.datetime_col
+      - base.horizon
+    outs:
+      - data/processed/train.csv
+      - data/processed/val.csv
+      - data/processed/test.csv
+
+  featurize:
+    cmd: python src/features/engineering.py --config params.yaml
+    deps:
+      - src/features/engineering.py
+      - data/processed/train.csv
+      - data/processed/val.csv
+      - data/processed/test.csv
+    params:
+      - features
+      - base.target_col
+    outs:
+      - data/processed/train_features.csv
+      - data/processed/val_features.csv
+      - data/processed/test_features.csv
+
+  train:
+    cmd: python src/training/train.py --config params.yaml
+    deps:
+      - src/training/train.py
+      - src/models/
+      - src/evaluation/metrics.py
+      - data/processed/train_features.csv
+      - data/processed/val_features.csv
+      - data/processed/test_features.csv
+    params:
+      - arima
+      - prophet
+      - lightgbm
+      - xgboost
+      - ensemble
+      - mlflow
+      - base
+    metrics:
+      - metrics/metrics.json:
+          cache: false
+    plots:
+      - metrics/predictions.csv:
+          cache: false
+          x: ds
+          y: y_pred
+
+metrics:
+  - metrics/metrics.json

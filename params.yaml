@@ -1,0 +1,71 @@
+# Project Parameters - DVC Pipeline Configuration
+
+base:
+  random_seed: 42
+  test_size: 0.2
+  val_size: 0.1
+  target_col: OT
+  datetime_col: date
+
+data:
+  raw_path: data/raw/ETTh1.csv
+  processed_train_path: data/processed/train.csv
+  processed_val_path: data/processed/val.csv
+  processed_test_path: data/processed/test.csv
+  horizon: 24       # forecast horizon (steps ahead)
+  freq: H           # hourly
+
+features:
+  lag_periods: [1, 2, 3, 6, 12, 24, 48, 168]   # 1h to 1 week
+  rolling_windows: [6, 12, 24, 168]
+  use_time_features: true
+
+arima:
+  p: 2
+  d: 1
+  q: 2
+  seasonal: false
+
+prophet:
+  changepoint_prior_scale: 0.05
+  seasonality_prior_scale: 10
+  seasonality_mode: multiplicative
+  yearly_seasonality: true
+  weekly_seasonality: true
+  daily_seasonality: true
+
+lightgbm:
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  num_leaves: 63
+  min_child_samples: 20
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_alpha: 0.1
+  reg_lambda: 0.1
+
+xgboost:
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_alpha: 0.1
+  reg_lambda: 1.0
+  min_child_weight: 5
+
+ensemble:
+  method: weighted_average   # weighted_average | stacking | simple_average
+  optimize_weights: true
+  meta_model: ridge
+
+mlflow:
+  experiment_name: mlops-timeseries-ensemble
+  tracking_uri: mlruns
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  model_name: ensemble_forecaster
+  model_stage: Production
