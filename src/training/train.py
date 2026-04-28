@@ -61,7 +61,7 @@ def train_arima(cfg: dict, train_raw: pd.DataFrame, target_col: str) -> ARIMAFor
         p=arima_cfg["p"],
         d=arima_cfg["d"],
         q=arima_cfg["q"],
-        horizon=cfg["base"]["horizon"],
+        horizon=cfg["data"]["horizon"],
     )
     model.fit(train_raw[target_col])
     return model
@@ -82,7 +82,7 @@ def train_prophet(
         yearly_seasonality=p_cfg["yearly_seasonality"],
         weekly_seasonality=p_cfg["weekly_seasonality"],
         daily_seasonality=p_cfg["daily_seasonality"],
-        horizon=cfg["base"]["horizon"],
+        horizon=cfg["data"]["horizon"],
         freq=cfg["data"]["freq"],
     )
     model.fit(train_raw, datetime_col, target_col)
@@ -230,7 +230,7 @@ def main(config_path: str) -> None:
     with mlflow.start_run(run_name="ensemble_training") as run:
         # ── Log all params from params.yaml ──────────────────────────────
         mlflow.log_params({
-            "horizon": cfg["base"]["horizon"],
+            "horizon": cfg["data"]["horizon"],
             "random_seed": cfg["base"]["random_seed"],
             "test_size": cfg["base"]["test_size"],
             "val_size": cfg["base"]["val_size"],
