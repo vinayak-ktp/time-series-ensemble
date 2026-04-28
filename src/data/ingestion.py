@@ -1,19 +1,11 @@
-"""
-Data Ingestion Script
-Downloads the ETTh1 (Electricity Transformer Temperature) dataset,
-a widely used benchmark for time series forecasting.
-"""
 import argparse
 import os
 import urllib.request
-import yaml
+
 import pandas as pd
+import yaml
 
-
-ETT_URL = (
-    "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/"
-    "ETT-small/ETTh1.csv"
-)
+ETT_URL = "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/ETT-small/ETTh1.csv"
 
 
 def download_dataset(url: str, dest_path: str) -> None:

@@ -1,18 +1,16 @@
-"""
-Prophet Model Wrapper for time series forecasting.
-Facebook Prophet handles trend + multiple seasonalities + holidays.
-"""
+import logging
+import warnings
+
 import numpy as np
 import pandas as pd
 from prophet import Prophet
-import logging
+
 logging.getLogger("prophet").setLevel(logging.WARNING)
 logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+warnings.filterwarnings("ignore")
 
 
 class ProphetForecaster:
-    """Prophet-based forecaster."""
-
     def __init__(
         self,
         changepoint_prior_scale: float = 0.05,
@@ -36,7 +34,6 @@ class ProphetForecaster:
         self._last_ds = None
 
     def fit(self, df: pd.DataFrame, datetime_col: str, target_col: str) -> "ProphetForecaster":
-        """Fit prophet on a DataFrame with datetime and target columns."""
         prophet_df = df[[datetime_col, target_col]].rename(
             columns={datetime_col: "ds", target_col: "y"}
         )
@@ -53,14 +50,12 @@ class ProphetForecaster:
         return self
 
     def predict(self, steps: int = None) -> np.ndarray:
-        """Predict `steps` steps into the future from last training date."""
         n = steps or self.horizon
         future = self.model_.make_future_dataframe(periods=n, freq=self.freq)
         forecast = self.model_.predict(future)
         return forecast["yhat"].values[-n:]
 
     def predict_on_df(self, df: pd.DataFrame, datetime_col: str) -> np.ndarray:
-        """Predict on a provided dataframe (for val/test)."""
         future = df[[datetime_col]].rename(columns={datetime_col: "ds"})
         forecast = self.model_.predict(future)
         return forecast["yhat"].values
