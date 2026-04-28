@@ -70,3 +70,7 @@ logs/
 # Environment
 .env
 *.env
+
+# Extras
+*.tex
+*.pdf

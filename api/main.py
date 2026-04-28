@@ -59,7 +59,7 @@ async def health():
     )
 
 
-@app.post("/predict", response_model=PredictResponse, tags=["forecast"])
+@app.post("/predict", response_model=PredictResponse, response_model_exclude_none=True, tags=["forecast"])
 async def predict(request: PredictRequest):
     if not predictor.is_loaded:
         raise HTTPException(
