@@ -29,7 +29,7 @@ jobs:
           pip install flake8 black isort mypy
 
       - name: Run flake8
-        run: flake8 src/ api/ tests/ --max-line-length=120 --ignore=E501,W503
+        run: flake8 src/ api/ tests/ --max-line-length=120 --ignore=E501,W503,E203
 
       - name: Check black formatting
         run: black --check src/ api/ tests/ --line-length=100

@@ -1,18 +1,14 @@
-"""
-XGBoost Model Wrapper for time series forecasting.
-Treats forecasting as a supervised regression problem using lag/rolling features.
-"""
+import warnings
+
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.base import BaseEstimator, RegressorMixin
-import warnings
+
 warnings.filterwarnings("ignore")
 
 
 class XGBForecaster(BaseEstimator, RegressorMixin):
-    """XGBoost regressor for time series with feature-based approach."""
-
     def __init__(
         self,
         n_estimators: int = 500,
@@ -39,7 +35,7 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
 
     def _get_feature_matrix(
         self, df: pd.DataFrame, target_col: str, datetime_col: str
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, list]:
         drop_cols = [target_col, datetime_col] if datetime_col in df.columns else [target_col]
         X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
         y = df[target_col].values
@@ -72,7 +68,6 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
             "seed": self.random_state,
             "verbosity": 0,
         }
-        evals_result = {}
         self.model_ = xgb.train(
             params,
             dtrain,
@@ -80,7 +75,6 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
             evals=[(dval, "val")],
             early_stopping_rounds=50,
             verbose_eval=False,
-            evals_result=evals_result,
         )
         return self
 

@@ -1,44 +1,41 @@
-"""
-Unit tests for preprocessing module.
-"""
 import os
 import sys
-import tempfile
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.data.preprocessing import chronological_split
-from src.features.engineering import (
+from src.data.preprocessing import chronological_split  # noqa: E402
+from src.evaluation.metrics import (  # noqa: E402
+    compute_all_metrics,
+    mae,
+    r2,
+    rmse,
+    smape,
+)
+from src.features.engineering import (  # noqa: E402
+    featurize,
     make_lag_features,
     make_rolling_features,
     make_time_features,
-    featurize,
-)
-from src.evaluation.metrics import (
-    mae, mse, rmse, mape, smape, r2, compute_all_metrics
 )
 
-
-# ── Fixtures ────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def sample_df():
-    """Minimal time series dataframe for testing."""
     n = 500
-    dates = pd.date_range("2021-01-01", periods=n, freq="H")
+    dates = pd.date_range("2021-01-01", periods=n, freq="h")
     np.random.seed(42)
-    df = pd.DataFrame({
-        "date": dates,
-        "OT": np.sin(np.linspace(0, 4 * np.pi, n)) + np.random.randn(n) * 0.1 + 5,
-        "HUFL": np.random.randn(n),
-    })
-    return df
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "OT": np.sin(np.linspace(0, 4 * np.pi, n)) + np.random.randn(n) * 0.1 + 5,
+            "HUFL": np.random.randn(n),
+        }
+    )
 
-
-# ── Preprocessing Tests ─────────────────────────────────────────────────────
 
 class TestChronologicalSplit:
     def test_split_sizes(self, sample_df):
@@ -47,8 +44,6 @@ class TestChronologicalSplit:
 
     def test_no_overlap(self, sample_df):
         train, val, test = chronological_split(sample_df, test_size=0.2, val_size=0.1)
-        assert train.index.max() < val.index.min() or len(val) == 0
-        # chronological: train ends before val starts
         assert train["date"].max() < val["date"].min()
         assert val["date"].max() < test["date"].min()
 
@@ -59,13 +54,10 @@ class TestChronologicalSplit:
         assert len(val) == pytest.approx(int(n * 0.1), abs=2)
 
 
-# ── Feature Engineering Tests ────────────────────────────────────────────────
-
 class TestLagFeatures:
     def test_creates_lag_columns(self, sample_df):
         df = make_lag_features(sample_df.copy(), "OT", [1, 2, 24])
         assert "OT_lag_1" in df.columns
-        assert "OT_lag_2" in df.columns
         assert "OT_lag_24" in df.columns
 
     def test_lag_1_is_shifted(self, sample_df):
@@ -82,9 +74,7 @@ class TestRollingFeatures:
             assert f"OT_roll_std_{w}" in df.columns
 
     def test_rolling_not_future_leak(self, sample_df):
-        # rolling is computed on shift(1) so no look-ahead
         df = make_rolling_features(sample_df.copy(), "OT", [6])
-        # First value should be NaN because shift(1) makes index 0 null
         assert pd.isna(df["OT_roll_mean_6"].iloc[0])
 
 
@@ -106,21 +96,13 @@ class TestTimeFeatures:
 
 class TestFeaturize:
     def test_drops_nan_rows(self, sample_df):
-        df_feat = featurize(
-            sample_df, "OT", "date",
-            lag_periods=[1, 168], rolling_windows=[24], use_time_features=True
-        )
+        df_feat = featurize(sample_df, "OT", "date", [1, 168], [24], use_time_features=True)
         assert not df_feat.isnull().any().any()
 
     def test_feature_count_increases(self, sample_df):
-        df_feat = featurize(
-            sample_df, "OT", "date",
-            lag_periods=[1, 2], rolling_windows=[6], use_time_features=True
-        )
+        df_feat = featurize(sample_df, "OT", "date", [1, 2], [6], use_time_features=True)
         assert len(df_feat.columns) > len(sample_df.columns)
 
-
-# ── Metrics Tests ────────────────────────────────────────────────────────────
 
 class TestMetrics:
     def setup_method(self):

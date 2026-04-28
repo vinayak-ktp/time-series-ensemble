@@ -1,18 +1,14 @@
-"""
-LightGBM Model Wrapper for time series forecasting.
-Treats forecasting as a supervised regression problem using lag/rolling features.
-"""
+import warnings
+
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
 from sklearn.base import BaseEstimator, RegressorMixin
-import warnings
+
 warnings.filterwarnings("ignore")
 
 
 class LGBMForecaster(BaseEstimator, RegressorMixin):
-    """LightGBM regressor for time series with feature-based approach."""
-
     def __init__(
         self,
         n_estimators: int = 500,
@@ -73,9 +69,13 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
             verbose=-1,
         )
         self.model_.fit(
-            X_train, y_train,
+            X_train,
+            y_train,
             eval_set=[(X_val, y_val)],
-            callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(period=-1)],
+            callbacks=[
+                lgb.early_stopping(50, verbose=False),
+                lgb.log_evaluation(period=-1),
+            ],
         )
         return self
 
