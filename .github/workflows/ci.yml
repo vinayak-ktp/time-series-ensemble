@@ -3,8 +3,16 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".gitignore"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".gitignore"
 
 env:
   PYTHON_VERSION: "3.12"
