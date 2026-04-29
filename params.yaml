@@ -1,7 +1,6 @@
 # Project Parameters - DVC Pipeline Configuration
 
 base:
-  random_seed: 42
   test_size: 0.2
   val_size: 0.1
   target_col: OT
@@ -26,13 +25,8 @@ arima:
   q: 2
   seasonal: false
 
-prophet:
-  changepoint_prior_scale: 0.05
-  seasonality_prior_scale: 10
-  seasonality_mode: multiplicative
-  yearly_seasonality: true
-  weekly_seasonality: true
-  daily_seasonality: true
+ridge:
+  alpha: 1.0
 
 lightgbm:
   n_estimators: 500

@@ -20,7 +20,6 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
         colsample_bytree: float = 0.8,
         reg_alpha: float = 0.1,
         reg_lambda: float = 0.1,
-        random_state: int = 42,
     ):
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
@@ -31,7 +30,6 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
         self.colsample_bytree = colsample_bytree
         self.reg_alpha = reg_alpha
         self.reg_lambda = reg_lambda
-        self.random_state = random_state
         self.model_ = None
         self.feature_names_ = None
 
@@ -65,7 +63,6 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
             colsample_bytree=self.colsample_bytree,
             reg_alpha=self.reg_alpha,
             reg_lambda=self.reg_lambda,
-            random_state=self.random_state,
             verbose=-1,
         )
         self.model_.fit(

@@ -1,0 +1,185 @@
+schema: '2.0'
+stages:
+  ingest:
+    cmd: python src/data/ingestion.py --config params.yaml
+    deps:
+    - path: src/data/ingestion.py
+      hash: md5
+      md5: 4e88b2d026a2c4ab4531125651db23a7
+      size: 1804
+    params:
+      params.yaml:
+        base.datetime_col: date
+        base.target_col: OT
+        data.raw_path: data/raw/ETTh1.csv
+    outs:
+    - path: data/raw/ETTh1.csv
+      hash: md5
+      md5: 8381763947c85f4be6ac456c508460d6
+      size: 2589657
+  preprocess:
+    cmd: python src/data/preprocessing.py --config params.yaml
+    deps:
+    - path: data/raw/ETTh1.csv
+      hash: md5
+      md5: 8381763947c85f4be6ac456c508460d6
+      size: 2589657
+    - path: src/data/preprocessing.py
+      hash: md5
+      md5: a54b130b3249d5c8ad0b0499e72eaa10
+      size: 2272
+    params:
+      params.yaml:
+        base.datetime_col: date
+        base.target_col: OT
+        base.test_size: 0.2
+        base.val_size: 0.1
+        data:
+          raw_path: data/raw/ETTh1.csv
+          processed_train_path: data/processed/train.csv
+          processed_val_path: data/processed/val.csv
+          processed_test_path: data/processed/test.csv
+          horizon: 24
+          freq: H
+        data.horizon: 24
+    outs:
+    - path: data/processed/test.csv
+      hash: md5
+      md5: e990c2b19ec4279d1e6ac4361e9d0ad5
+      size: 547164
+    - path: data/processed/train.csv
+      hash: md5
+      md5: 2bbf0bfe38b797f7519af48c9bf89f90
+      size: 1920519
+    - path: data/processed/val.csv
+      hash: md5
+      md5: 7ce70e4fadb11bb99d7b31e794ceba17
+      size: 271976
+  featurize:
+    cmd: python src/features/engineering.py --config params.yaml
+    deps:
+    - path: data/processed/test.csv
+      hash: md5
+      md5: e990c2b19ec4279d1e6ac4361e9d0ad5
+      size: 547164
+    - path: data/processed/train.csv
+      hash: md5
+      md5: 2bbf0bfe38b797f7519af48c9bf89f90
+      size: 1920519
+    - path: data/processed/val.csv
+      hash: md5
+      md5: 7ce70e4fadb11bb99d7b31e794ceba17
+      size: 271976
+    - path: src/features/engineering.py
+      hash: md5
+      md5: 8c98773b9e9d10b60508e68327cfeb97
+      size: 3453
+    params:
+      params.yaml:
+        base.target_col: OT
+        features:
+          lag_periods:
+          - 1
+          - 2
+          - 3
+          - 6
+          - 12
+          - 24
+          - 48
+          - 168
+          rolling_windows:
+          - 6
+          - 12
+          - 24
+          - 168
+          use_time_features: true
+    outs:
+    - path: data/processed/test_features.csv
+      hash: md5
+      md5: db586e25645977ce0fd4aa2d6a9a20d0
+      size: 2489109
+    - path: data/processed/train_features.csv
+      hash: md5
+      md5: ad1258716e3072ec6fec840389067eec
+      size: 8956202
+    - path: data/processed/val_features.csv
+      hash: md5
+      md5: 5ec411eab2ec1a8e62aa046546ccba8f
+      size: 1176912
+  train:
+    cmd: python src/training/train.py --config params.yaml
+    deps:
+    - path: data/processed/test_features.csv
+      hash: md5
+      md5: db586e25645977ce0fd4aa2d6a9a20d0
+      size: 2489109
+    - path: data/processed/train_features.csv
+      hash: md5
+      md5: ad1258716e3072ec6fec840389067eec
+      size: 8956202
+    - path: data/processed/val_features.csv
+      hash: md5
+      md5: 5ec411eab2ec1a8e62aa046546ccba8f
+      size: 1176912
+    - path: src/evaluation/metrics.py
+      hash: md5
+      md5: da0bcf8acb7a3adcba991c0a3a71e7fa
+      size: 1284
+    - path: src/models/
+      hash: md5
+      md5: 134ac3609e1a941d57f1c4df8b422d44.dir
+      size: 38085
+      nfiles: 14
+    - path: src/training/train.py
+      hash: md5
+      md5: b018b23d680ccd4d3393d4fba3211c7c
+      size: 9889
+    params:
+      params.yaml:
+        arima:
+          p: 2
+          d: 1
+          q: 2
+          seasonal: false
+        base:
+          test_size: 0.2
+          val_size: 0.1
+          target_col: OT
+          datetime_col: date
+        ensemble:
+          method: weighted_average
+          optimize_weights: true
+          meta_model: ridge
+        lightgbm:
+          n_estimators: 500
+          learning_rate: 0.05
+          max_depth: 6
+          num_leaves: 63
+          min_child_samples: 20
+          subsample: 0.8
+          colsample_bytree: 0.8
+          reg_alpha: 0.1
+          reg_lambda: 0.1
+        mlflow:
+          experiment_name: mlops-timeseries-ensemble
+          tracking_uri: mlruns
+        ridge:
+          alpha: 1.0
+        xgboost:
+          n_estimators: 500
+          learning_rate: 0.05
+          max_depth: 6
+          subsample: 0.8
+          colsample_bytree: 0.8
+          reg_alpha: 0.1
+          reg_lambda: 1.0
+          min_child_weight: 5
+    outs:
+    - path: metrics/metrics.json
+      hash: md5
+      md5: 96baa64710aeba2928edd0c0f05d859e
+      size: 796
+    - path: metrics/predictions.csv
+      hash: md5
+      md5: 699503ef33ba26eae25b2f619f30bbf4
+      size: 432879
