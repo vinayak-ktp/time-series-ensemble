@@ -19,7 +19,6 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
         reg_alpha: float = 0.1,
         reg_lambda: float = 1.0,
         min_child_weight: int = 5,
-        random_state: int = 42,
     ):
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
@@ -29,7 +28,6 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
         self.reg_alpha = reg_alpha
         self.reg_lambda = reg_lambda
         self.min_child_weight = min_child_weight
-        self.random_state = random_state
         self.model_ = None
         self.feature_names_ = None
 
@@ -65,7 +63,6 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
             "reg_alpha": self.reg_alpha,
             "reg_lambda": self.reg_lambda,
             "min_child_weight": self.min_child_weight,
-            "seed": self.random_state,
             "verbosity": 0,
         }
         self.model_ = xgb.train(

@@ -21,7 +21,7 @@ from src.evaluation.metrics import compute_all_metrics  # noqa: E402
 from src.models.arima_model import ARIMAForecaster  # noqa: E402
 from src.models.ensemble import EnsembleForecaster  # noqa: E402
 from src.models.lgbm_model import LGBMForecaster  # noqa: E402
-from src.models.prophet_model import ProphetForecaster  # noqa: E402
+from src.models.linear_model import RidgeForecaster  # noqa: E402
 from src.models.xgboost_model import XGBForecaster  # noqa: E402
 
 
@@ -62,25 +62,16 @@ def train_arima(cfg: dict, train_raw: pd.DataFrame, target_col: str) -> ARIMAFor
     return model
 
 
-def train_prophet(
+def train_ridge(
     cfg: dict,
-    train_raw: pd.DataFrame,
+    train_feat: pd.DataFrame,
+    val_feat: pd.DataFrame,
     target_col: str,
     datetime_col: str,
-) -> ProphetForecaster:
-    print("[train] Training Prophet...")
-    p_cfg = cfg["prophet"]
-    model = ProphetForecaster(
-        changepoint_prior_scale=p_cfg["changepoint_prior_scale"],
-        seasonality_prior_scale=p_cfg["seasonality_prior_scale"],
-        seasonality_mode=p_cfg["seasonality_mode"],
-        yearly_seasonality=p_cfg["yearly_seasonality"],
-        weekly_seasonality=p_cfg["weekly_seasonality"],
-        daily_seasonality=p_cfg["daily_seasonality"],
-        horizon=cfg["data"]["horizon"],
-        freq=cfg["data"]["freq"],
-    )
-    model.fit(train_raw, datetime_col, target_col)
+) -> RidgeForecaster:
+    print("[train] Training Ridge...")
+    model = RidgeForecaster(alpha=cfg["ridge"]["alpha"])
+    model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
@@ -103,7 +94,6 @@ def train_lgbm(
         colsample_bytree=l_cfg["colsample_bytree"],
         reg_alpha=l_cfg["reg_alpha"],
         reg_lambda=l_cfg["reg_lambda"],
-        random_state=cfg["base"]["random_seed"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
@@ -127,7 +117,6 @@ def train_xgboost(
         reg_alpha=x_cfg["reg_alpha"],
         reg_lambda=x_cfg["reg_lambda"],
         min_child_weight=x_cfg["min_child_weight"],
-        random_state=cfg["base"]["random_seed"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
@@ -140,34 +129,23 @@ def get_predictions(
     target_col: str,
     datetime_col: str,
 ) -> tuple[dict, dict]:
-    arima: ARIMAForecaster = models["arima"]
-    prophet: ProphetForecaster = models["prophet"]
-    lgbm: LGBMForecaster = models["lgbm"]
-    xgb_model: XGBForecaster = models["xgboost"]
+    arima = models["arima"]
+    ridge = models["ridge"]
+    lgbm = models["lgbm"]
+    xgb_model = models["xgboost"]
 
-    arima_val = arima.predict(steps=len(val_feat))
-    if len(arima_val) < len(val_feat):
-        arima_val = np.pad(
-            arima_val, (0, len(val_feat) - len(arima_val)), constant_values=arima_val[-1]
-        )
-
-    arima_test = arima.predict(steps=len(test_feat))
-    if len(arima_test) < len(test_feat):
-        arima_test = np.pad(
-            arima_test,
-            (0, len(test_feat) - len(arima_test)),
-            constant_values=arima_test[-1],
-        )
+    arima_val = arima.rolling_forecast(val_feat[target_col].values)
+    arima_test = arima.rolling_forecast(test_feat[target_col].values)
 
     val_preds = {
-        "arima": arima_val[: len(val_feat)],
-        "prophet": prophet.predict_on_df(val_feat, datetime_col),
+        "arima": arima_val,
+        "ridge": ridge.predict(val_feat, target_col, datetime_col),
         "lgbm": lgbm.predict(val_feat, target_col, datetime_col),
         "xgboost": xgb_model.predict(val_feat, target_col, datetime_col),
     }
     test_preds = {
-        "arima": arima_test[: len(test_feat)],
-        "prophet": prophet.predict_on_df(test_feat, datetime_col),
+        "arima": arima_test,
+        "ridge": ridge.predict(test_feat, target_col, datetime_col),
         "lgbm": lgbm.predict(test_feat, target_col, datetime_col),
         "xgboost": xgb_model.predict(test_feat, target_col, datetime_col),
     }
@@ -210,7 +188,6 @@ def main(config_path: str) -> None:
         mlflow.log_params(
             {
                 "horizon": cfg["data"]["horizon"],
-                "random_seed": cfg["base"]["random_seed"],
                 "test_size": cfg["base"]["test_size"],
                 "val_size": cfg["base"]["val_size"],
                 "ensemble_method": cfg["ensemble"]["method"],
@@ -221,9 +198,9 @@ def main(config_path: str) -> None:
             arima = train_arima(cfg, train_raw, target_col)
             mlflow.log_params(arima.get_params())
 
-        with mlflow.start_run(run_name="prophet", nested=True):
-            prophet = train_prophet(cfg, train_raw, target_col, datetime_col)
-            mlflow.log_params(prophet.get_params())
+        with mlflow.start_run(run_name="ridge", nested=True):
+            ridge = train_ridge(cfg, train_feat, val_feat, target_col, datetime_col)
+            mlflow.log_params(ridge.get_params())
 
         with mlflow.start_run(run_name="lgbm", nested=True):
             lgbm = train_lgbm(cfg, train_feat, val_feat, target_col, datetime_col)
@@ -235,7 +212,7 @@ def main(config_path: str) -> None:
 
         models = {
             "arima": arima,
-            "prophet": prophet,
+            "ridge": ridge,
             "lgbm": lgbm,
             "xgboost": xgb_model,
         }
@@ -252,7 +229,7 @@ def main(config_path: str) -> None:
             log_model_metrics(name, m)
             print(
                 f"[eval] {name:10s} | RMSE={m['rmse']:.4f} "
-                f"| MAE={m['mae']:.4f} | R²={m['r2']:.4f}"
+                f"| MAE={m['mae']:.4f} | SMAPE={m['smape']:.2f}% | R²={m['r2']:.4f}"
             )
 
         print("[train] Fitting ensemble...")
@@ -265,12 +242,13 @@ def main(config_path: str) -> None:
         mlflow.log_metrics({f"ensemble_weight_{k}": v for k, v in ensemble.get_weights().items()})
         print(
             f"[eval] {'ensemble':10s} | RMSE={ensemble_metrics['rmse']:.4f} "
-            f"| MAE={ensemble_metrics['mae']:.4f} | R²={ensemble_metrics['r2']:.4f}"
+            f"| MAE={ensemble_metrics['mae']:.4f} | SMAPE={ensemble_metrics['smape']:.2f}% "
+            f"| R²={ensemble_metrics['r2']:.4f}"
         )
 
         for name, obj in [
             ("arima", arima),
-            ("prophet", prophet),
+            ("ridge", ridge),
             ("lgbm", lgbm),
             ("xgboost", xgb_model),
             ("ensemble", ensemble),

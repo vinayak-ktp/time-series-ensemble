@@ -17,7 +17,6 @@ stages:
       - data/raw/ETTh1.csv
     params:
       - data
-      - base.random_seed
       - base.test_size
       - base.val_size
       - base.target_col
@@ -54,7 +53,7 @@ stages:
       - data/processed/test_features.csv
     params:
       - arima
-      - prophet
+      - ridge
       - lightgbm
       - xgboost
       - ensemble

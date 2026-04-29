@@ -71,6 +71,7 @@ async def predict(request: PredictRequest):
             start_datetime=request.start_datetime,
             steps=request.steps,
             include_components=request.include_components,
+            history=request.history,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
