@@ -17,12 +17,12 @@ warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from src.evaluation.metrics import compute_all_metrics  # noqa: E402
-from src.models.arima_model import ARIMAForecaster  # noqa: E402
-from src.models.ensemble import EnsembleForecaster  # noqa: E402
-from src.models.lgbm_model import LGBMForecaster  # noqa: E402
-from src.models.linear_model import RidgeForecaster  # noqa: E402
-from src.models.xgboost_model import XGBForecaster  # noqa: E402
+from src.evaluation.metrics import compute_all_metrics
+from src.models.arima_model import ARIMAForecaster
+from src.models.ensemble import EnsembleForecaster
+from src.models.lgbm_model import LGBMForecaster
+from src.models.linear_model import RidgeForecaster
+from src.models.xgboost_model import XGBForecaster
 
 
 def load_data(cfg: dict) -> tuple:
