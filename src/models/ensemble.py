@@ -10,8 +10,9 @@ def _mse(weights: np.ndarray, preds: np.ndarray, y_true: np.ndarray) -> float:
 
 
 class EnsembleForecaster:
-    def __init__(self, method: str = "weighted_average"):
+    def __init__(self, method: str = "weighted_average", min_weight: float = 0.1):
         self.method = method
+        self.min_weight = min_weight
         self.weights_ = None
         self.meta_model_ = None
         self.model_names_ = None
@@ -31,7 +32,11 @@ class EnsembleForecaster:
         elif self.method == "weighted_average":
             n = len(self.model_names_)
             x0 = np.ones(n) / n
-            bounds = [(0, 1)] * n
+            # Each model gets at least min_weight, remainder distributed freely.
+            # Constraint: sum == 1. Bounds ensure min contribution per member.
+            low = self.min_weight
+            high = 1.0 - low * (n - 1)   # max any single model can receive
+            bounds = [(low, high)] * n
             constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
             result = minimize(
                 _mse,
@@ -43,7 +48,7 @@ class EnsembleForecaster:
             )
             self.weights_ = result.x
             print(
-                f"[ensemble] Optimized weights: "
+                f"[ensemble] Optimized weights (min={low}): "
                 f"{dict(zip(self.model_names_, self.weights_.round(4)))}"
             )
 

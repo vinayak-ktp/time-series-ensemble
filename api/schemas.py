@@ -19,8 +19,8 @@ class PredictRequest(BaseModel):
         description=(
             "Recent OT values in chronological order (standardised scale), "
             "ending at start_datetime - 1h. Providing at least 168 values "
-            "enables accurate LightGBM/XGBoost predictions via real lag features. "
-            "When omitted, the API falls back to ARIMA-derived synthetic features."
+            "enables accurate predictions via real lag features. "
+            "When omitted, the API uses a constant-seed synthetic feature matrix."
         ),
     )
 
@@ -30,10 +30,11 @@ class ForecastPoint(BaseModel):
 
     datetime: str
     prediction: float
-    arima: Optional[float] = None
     ridge: Optional[float] = None
     lgbm: Optional[float] = None
     xgboost: Optional[float] = None
+    catboost: Optional[float] = None
+    extra_trees: Optional[float] = None
 
 
 class PredictResponse(BaseModel):

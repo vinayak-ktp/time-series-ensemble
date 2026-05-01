@@ -19,11 +19,6 @@ features:
   rolling_windows: [6, 12, 24, 168]
   use_time_features: true
 
-arima:
-  p: 2
-  d: 1
-  q: 2
-  seasonal: false
 
 ridge:
   alpha: 1.0
@@ -49,10 +44,25 @@ xgboost:
   reg_lambda: 1.0
   min_child_weight: 5
 
+catboost:
+  n_estimators: 1000
+  learning_rate: 0.05
+  max_depth: 6
+  subsample: 0.8
+  reg_lambda: 3.0
+  min_child_samples: 20
+
+extra_trees:
+  n_estimators: 500
+  max_depth: null          # None = unconstrained (bagging bias)
+  min_samples_leaf: 4
+  max_features: 0.5
+
 ensemble:
   method: weighted_average   # weighted_average | stacking | simple_average
   optimize_weights: true
-  meta_model: ridge
+  min_weight: 0.10           # minimum weight per ensemble member (prevents collapse)
+  models: [ridge, catboost, extra_trees]   # 3 models with diverse inductive biases
 
 mlflow:
   experiment_name: mlops-timeseries-ensemble

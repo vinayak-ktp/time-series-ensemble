@@ -12,7 +12,7 @@ numpy
 statsmodels
 lightgbm
 xgboost
-prophet
+catboost
 pyarrow
 tqdm
 pyyaml

@@ -14,10 +14,9 @@ def val_preds():
     np.random.seed(42)
     n = 200
     return {
-        "arima": np.random.randn(n) * 0.5 + 3,
-        "prophet": np.random.randn(n) * 0.5 + 3,
-        "lgbm": np.random.randn(n) * 0.5 + 3,
-        "xgboost": np.random.randn(n) * 0.5 + 3,
+        "ridge": np.random.randn(n) * 0.3 + 3,
+        "catboost": np.random.randn(n) * 0.5 + 3,
+        "extra_trees": np.random.randn(n) * 0.5 + 3,
     }
 
 
@@ -31,8 +30,9 @@ class TestSimpleAverage:
     def test_simple_average_equal_weights(self, val_preds, y_val):
         ens = EnsembleForecaster(method="simple_average")
         ens.fit_weights(val_preds, y_val)
+        n = len(val_preds)
         for v in ens.get_weights().values():
-            assert abs(v - 0.25) < 1e-8
+            assert abs(v - 1.0 / n) < 1e-8
 
     def test_predict_shape(self, val_preds, y_val):
         ens = EnsembleForecaster(method="simple_average")
@@ -45,6 +45,13 @@ class TestWeightedAverage:
         ens = EnsembleForecaster(method="weighted_average")
         ens.fit_weights(val_preds, y_val)
         assert abs(sum(ens.get_weights().values()) - 1.0) < 1e-5
+
+    def test_weights_respect_min_floor(self, val_preds, y_val):
+        min_w = 0.10
+        ens = EnsembleForecaster(method="weighted_average", min_weight=min_w)
+        ens.fit_weights(val_preds, y_val)
+        for name, v in ens.get_weights().items():
+            assert v >= min_w - 1e-6, f"{name} weight {v:.4f} below min_weight {min_w}"
 
     def test_weights_nonnegative(self, val_preds, y_val):
         ens = EnsembleForecaster(method="weighted_average")

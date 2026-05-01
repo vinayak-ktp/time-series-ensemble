@@ -52,10 +52,11 @@ stages:
       - data/processed/val_features.csv
       - data/processed/test_features.csv
     params:
-      - arima
       - ridge
       - lightgbm
       - xgboost
+      - catboost
+      - extra_trees
       - ensemble
       - mlflow
       - base

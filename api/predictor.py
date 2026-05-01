@@ -15,23 +15,26 @@ MIN_HISTORY = max(LAG_PERIODS)  # 168 — one week
 
 class ForecastPredictor:
     def __init__(self):
-        self.arima = None
         self.ridge = None
         self.lgbm = None
         self.xgboost = None
+        self.catboost = None
+        self.extra_trees = None
         self.ensemble = None
         self._loaded = False
 
     def load(self) -> None:
         try:
-            with open(os.path.join(MODELS_DIR, "arima.pkl"), "rb") as f:
-                self.arima = pickle.load(f)
             with open(os.path.join(MODELS_DIR, "ridge.pkl"), "rb") as f:
                 self.ridge = pickle.load(f)
             with open(os.path.join(MODELS_DIR, "lgbm.pkl"), "rb") as f:
                 self.lgbm = pickle.load(f)
             with open(os.path.join(MODELS_DIR, "xgboost.pkl"), "rb") as f:
                 self.xgboost = pickle.load(f)
+            with open(os.path.join(MODELS_DIR, "catboost.pkl"), "rb") as f:
+                self.catboost = pickle.load(f)
+            with open(os.path.join(MODELS_DIR, "extra_trees.pkl"), "rb") as f:
+                self.extra_trees = pickle.load(f)
             with open(os.path.join(MODELS_DIR, "ensemble.pkl"), "rb") as f:
                 self.ensemble = pickle.load(f)
             self._loaded = True
@@ -109,7 +112,6 @@ class ForecastPredictor:
 
             # Recurse: use the ensemble prediction as the next step's OT value.
             # We append a placeholder here and overwrite after the first model pass.
-            # (See predict() for how this is handled in two-pass fashion.)
             ot_series.append(0.0)
 
         feat_df = pd.DataFrame(rows)
@@ -117,22 +119,38 @@ class ForecastPredictor:
         return feat_df
 
     def _build_feature_matrix_synthetic(
-        self, future_dates: List[datetime], arima_preds: np.ndarray
+        self, future_dates: List[datetime], seed_value: float
     ) -> pd.DataFrame:
-        """Fallback: build feature matrix using ARIMA extrapolation as synthetic OT."""
-        feat_df = pd.DataFrame({"date": future_dates, "OT": arima_preds})
+        """
+        Fallback when no history is provided.
+        Builds a feature matrix using a flat extrapolation from the seed value.
+        Uses the last-known OT as a constant seed for all lag/rolling features.
+        """
+        n = len(future_dates)
+        seed_series = np.full(n, seed_value)
+
+        feat_df = pd.DataFrame({"date": future_dates, "OT": seed_series})
         feat_df = self._make_time_features(feat_df, "date")
         for lag in LAG_PERIODS:
-            feat_df[f"OT_lag_{lag}"] = np.roll(arima_preds, lag)
+            feat_df[f"OT_lag_{lag}"] = seed_value
         for w in ROLLING_WINDOWS:
-            s = pd.Series(arima_preds)
-            feat_df[f"OT_roll_mean_{w}"] = s.rolling(w, min_periods=1).mean().values
-            feat_df[f"OT_roll_std_{w}"] = s.rolling(w, min_periods=1).std().fillna(0).values
-            feat_df[f"OT_roll_min_{w}"] = s.rolling(w, min_periods=1).min().values
-            feat_df[f"OT_roll_max_{w}"] = s.rolling(w, min_periods=1).max().values
+            feat_df[f"OT_roll_mean_{w}"] = seed_value
+            feat_df[f"OT_roll_std_{w}"] = 0.0
+            feat_df[f"OT_roll_min_{w}"] = seed_value
+            feat_df[f"OT_roll_max_{w}"] = seed_value
         for col in ["HUFL", "HULL", "MUFL", "MULL", "LUFL", "LULL"]:
             feat_df[col] = 0.0
         return feat_df
+
+    # Map model names (as stored by EnsembleForecaster) to loaded model objects
+    def _model_map(self) -> dict:
+        return {
+            "ridge": self.ridge,
+            "lgbm": self.lgbm,
+            "xgboost": self.xgboost,
+            "catboost": self.catboost,
+            "extra_trees": self.extra_trees,
+        }
 
     def predict(
         self,
@@ -146,55 +164,47 @@ class ForecastPredictor:
 
         start_dt = datetime.fromisoformat(start_datetime)
         future_dates = [start_dt + timedelta(hours=i) for i in range(steps)]
-        future_df = pd.DataFrame({"date": future_dates})
 
-        # ARIMA: always uses its internal state, extending from training end
-        arima_preds = np.array(self.arima.predict(steps=steps))
+        ensemble_members = list(self.ensemble.model_names_)  # e.g. ['ridge','catboost','extra_trees']
+        model_map = self._model_map()
 
         use_real_history = history is not None and len(history) > 0
         history_mode = "real" if use_real_history else "synthetic"
 
+        preds_dict: dict[str, np.ndarray] = {}
+
         if use_real_history:
-            # Step-by-step recursive feature construction using real history
+            # Step-by-step recursive rollout using real historical OT
             ot_series = list(history)
-            ridge_preds = np.zeros(steps)
-            lgbm_preds = np.zeros(steps)
-            xgb_preds = np.zeros(steps)
+            step_preds: dict[str, list] = {name: [] for name in ensemble_members}
 
             for i in range(steps):
                 feat_df = self._build_feature_matrix_from_history(
                     [future_dates[i]], ot_series
                 )
-                try:
-                    ridge_preds[i] = self.ridge.predict(feat_df, "OT", "date")[0]
-                    lgbm_preds[i] = self.lgbm.predict(feat_df, "OT", "date")[0]
-                    xgb_preds[i] = self.xgboost.predict(feat_df, "OT", "date")[0]
-                except Exception:
-                    ridge_preds[i] = arima_preds[i]
-                    lgbm_preds[i] = arima_preds[i]
-                    xgb_preds[i] = arima_preds[i]
+                step_vals = {}
+                for name in ensemble_members:
+                    try:
+                        step_vals[name] = model_map[name].predict(feat_df, "OT", "date")[0]
+                    except Exception:
+                        step_vals[name] = float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
+                    step_preds[name].append(step_vals[name])
 
-                # Auto-regressive rollout: use mean of tree models as next OT
-                ot_series.append(float((lgbm_preds[i] + xgb_preds[i]) / 2.0))
+                # Auto-regressive rollout: use ensemble mean as next OT seed
+                next_ot = float(np.mean(list(step_vals.values())))
+                ot_series.append(next_ot)
+
+            preds_dict = {name: np.array(vals) for name, vals in step_preds.items()}
+
         else:
-            # Synthetic fallback: build feature matrix from ARIMA extrapolation
-            arima_series = arima_preds
-            feat_df = self._build_feature_matrix_synthetic(future_dates, arima_series)
-            try:
-                ridge_preds = self.ridge.predict(feat_df, "OT", "date")
-                lgbm_preds = self.lgbm.predict(feat_df, "OT", "date")
-                xgb_preds = self.xgboost.predict(feat_df, "OT", "date")
-            except Exception:
-                ridge_preds = arima_preds.copy()
-                lgbm_preds = arima_preds.copy()
-                xgb_preds = arima_preds.copy()
+            # Synthetic fallback — use a constant seed (0.0) for feature matrix
+            feat_df = self._build_feature_matrix_synthetic(future_dates, seed_value=0.0)
+            for name in ensemble_members:
+                try:
+                    preds_dict[name] = model_map[name].predict(feat_df, "OT", "date")
+                except Exception:
+                    preds_dict[name] = np.zeros(steps)
 
-        preds_dict = {
-            "arima": arima_preds[:steps],
-            "ridge": ridge_preds[:steps],
-            "lgbm": lgbm_preds[:steps],
-            "xgboost": xgb_preds[:steps],
-        }
         ensemble_preds = self.ensemble.predict(preds_dict)
 
         result: dict = {
@@ -211,10 +221,8 @@ class ForecastPredictor:
                 "prediction": float(ensemble_preds[i]),
             }
             if include_components:
-                point["arima"] = float(preds_dict["arima"][i])
-                point["ridge"] = float(preds_dict["ridge"][i])
-                point["lgbm"] = float(preds_dict["lgbm"][i])
-                point["xgboost"] = float(preds_dict["xgboost"][i])
+                for name in ensemble_members:
+                    point[name] = float(preds_dict[name][i])
             result["forecast"].append(point)
 
         return result

@@ -67,7 +67,12 @@ class TestModelsEndpoint:
     def test_models_returns_200(self, client):
         assert client.get("/models").status_code == 200
 
-    def test_models_lists_four_models(self, client):
+    def test_models_lists_all_trained_models(self, client):
         data = client.get("/models").json()
-        assert "models" in data
-        assert len(data["models"]) == 4
+        assert "all_trained_models" in data
+        assert len(data["all_trained_models"]) == 5
+
+    def test_models_lists_ensemble_members(self, client):
+        data = client.get("/models").json()
+        assert "ensemble_members" in data
+        assert len(data["ensemble_members"]) == 3

@@ -18,8 +18,9 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from src.evaluation.metrics import compute_all_metrics
-from src.models.arima_model import ARIMAForecaster
+from src.models.catboost_model import CatBoostForecaster
 from src.models.ensemble import EnsembleForecaster
+from src.models.extra_trees_model import ExtraTreesForecaster
 from src.models.lgbm_model import LGBMForecaster
 from src.models.linear_model import RidgeForecaster
 from src.models.xgboost_model import XGBForecaster
@@ -29,37 +30,11 @@ def load_data(cfg: dict) -> tuple:
     target_col = cfg["base"]["target_col"]
     datetime_col = cfg["base"]["datetime_col"]
 
-    train_raw = pd.read_csv(cfg["data"]["processed_train_path"])
-    val_raw = pd.read_csv(cfg["data"]["processed_val_path"])
-    test_raw = pd.read_csv(cfg["data"]["processed_test_path"])
-
     train_feat = pd.read_csv("data/processed/train_features.csv")
     val_feat = pd.read_csv("data/processed/val_features.csv")
     test_feat = pd.read_csv("data/processed/test_features.csv")
 
-    return (
-        train_raw,
-        val_raw,
-        test_raw,
-        train_feat,
-        val_feat,
-        test_feat,
-        target_col,
-        datetime_col,
-    )
-
-
-def train_arima(cfg: dict, train_raw: pd.DataFrame, target_col: str) -> ARIMAForecaster:
-    print("\n[train] Training ARIMA...")
-    arima_cfg = cfg["arima"]
-    model = ARIMAForecaster(
-        p=arima_cfg["p"],
-        d=arima_cfg["d"],
-        q=arima_cfg["q"],
-        horizon=cfg["data"]["horizon"],
-    )
-    model.fit(train_raw[target_col])
-    return model
+    return train_feat, val_feat, test_feat, target_col, datetime_col
 
 
 def train_ridge(
@@ -122,6 +97,46 @@ def train_xgboost(
     return model
 
 
+def train_catboost(
+    cfg: dict,
+    train_feat: pd.DataFrame,
+    val_feat: pd.DataFrame,
+    target_col: str,
+    datetime_col: str,
+) -> CatBoostForecaster:
+    print("[train] Training CatBoost...")
+    c_cfg = cfg["catboost"]
+    model = CatBoostForecaster(
+        n_estimators=c_cfg["n_estimators"],
+        learning_rate=c_cfg["learning_rate"],
+        max_depth=c_cfg["max_depth"],
+        subsample=c_cfg["subsample"],
+        reg_lambda=c_cfg["reg_lambda"],
+        min_child_samples=c_cfg["min_child_samples"],
+    )
+    model.fit(train_feat, val_feat, target_col, datetime_col)
+    return model
+
+
+def train_extra_trees(
+    cfg: dict,
+    train_feat: pd.DataFrame,
+    val_feat: pd.DataFrame,
+    target_col: str,
+    datetime_col: str,
+) -> ExtraTreesForecaster:
+    print("[train] Training Extra Trees...")
+    et_cfg = cfg["extra_trees"]
+    model = ExtraTreesForecaster(
+        n_estimators=et_cfg["n_estimators"],
+        max_depth=et_cfg["max_depth"],   # None allowed via yaml null
+        min_samples_leaf=et_cfg["min_samples_leaf"],
+        max_features=et_cfg["max_features"],
+    )
+    model.fit(train_feat, val_feat, target_col, datetime_col)
+    return model
+
+
 def get_predictions(
     models: dict,
     val_feat: pd.DataFrame,
@@ -129,26 +144,11 @@ def get_predictions(
     target_col: str,
     datetime_col: str,
 ) -> tuple[dict, dict]:
-    arima = models["arima"]
-    ridge = models["ridge"]
-    lgbm = models["lgbm"]
-    xgb_model = models["xgboost"]
-
-    arima_val = arima.rolling_forecast(val_feat[target_col].values)
-    arima_test = arima.rolling_forecast(test_feat[target_col].values)
-
-    val_preds = {
-        "arima": arima_val,
-        "ridge": ridge.predict(val_feat, target_col, datetime_col),
-        "lgbm": lgbm.predict(val_feat, target_col, datetime_col),
-        "xgboost": xgb_model.predict(val_feat, target_col, datetime_col),
-    }
-    test_preds = {
-        "arima": arima_test,
-        "ridge": ridge.predict(test_feat, target_col, datetime_col),
-        "lgbm": lgbm.predict(test_feat, target_col, datetime_col),
-        "xgboost": xgb_model.predict(test_feat, target_col, datetime_col),
-    }
+    val_preds = {}
+    test_preds = {}
+    for name, model in models.items():
+        val_preds[name] = model.predict(val_feat, target_col, datetime_col)
+        test_preds[name] = model.predict(test_feat, target_col, datetime_col)
     return val_preds, test_preds
 
 
@@ -170,19 +170,13 @@ def main(config_path: str) -> None:
     mlflow.set_tracking_uri(cfg["mlflow"]["tracking_uri"])
     mlflow.set_experiment(cfg["mlflow"]["experiment_name"])
 
-    (
-        train_raw,
-        val_raw,  # noqa: F841
-        test_raw,  # noqa: F841
-        train_feat,
-        val_feat,
-        test_feat,
-        target_col,
-        datetime_col,
-    ) = load_data(cfg)
+    train_feat, val_feat, test_feat, target_col, datetime_col = load_data(cfg)
 
     y_val = val_feat[target_col].values
     y_test = test_feat[target_col].values
+
+    # Models included in the final ensemble (from params.yaml)
+    ensemble_model_names: list[str] = cfg["ensemble"]["models"]
 
     with mlflow.start_run(run_name="ensemble_training") as run:
         mlflow.log_params(
@@ -191,13 +185,11 @@ def main(config_path: str) -> None:
                 "test_size": cfg["base"]["test_size"],
                 "val_size": cfg["base"]["val_size"],
                 "ensemble_method": cfg["ensemble"]["method"],
+                "ensemble_models": ",".join(ensemble_model_names),
             }
         )
 
-        with mlflow.start_run(run_name="arima", nested=True):
-            arima = train_arima(cfg, train_raw, target_col)
-            mlflow.log_params(arima.get_params())
-
+        # ── Train all candidate models ──────────────────────────────────────
         with mlflow.start_run(run_name="ridge", nested=True):
             ridge = train_ridge(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(ridge.get_params())
@@ -210,49 +202,65 @@ def main(config_path: str) -> None:
             xgb_model = train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(xgb_model.get_params())
 
-        models = {
-            "arima": arima,
+        with mlflow.start_run(run_name="catboost", nested=True):
+            catboost_model = train_catboost(cfg, train_feat, val_feat, target_col, datetime_col)
+            mlflow.log_params(catboost_model.get_params())
+
+        with mlflow.start_run(run_name="extra_trees", nested=True):
+            et_model = train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col)
+            mlflow.log_params(et_model.get_params())
+
+        # ── All trained models (for observability logging) ──────────────────
+        all_models = {
             "ridge": ridge,
             "lgbm": lgbm,
             "xgboost": xgb_model,
+            "catboost": catboost_model,
+            "extra_trees": et_model,
         }
 
-        print("[train] Generating predictions...")
-        val_preds, test_preds = get_predictions(
-            models, val_feat, test_feat, target_col, datetime_col
+        print("\n[train] Generating predictions for all models...")
+        val_preds_all, test_preds_all = get_predictions(
+            all_models, val_feat, test_feat, target_col, datetime_col
         )
 
+        # Log metrics for every model to MLflow (full observability)
         all_metrics = {}
-        for name, preds in test_preds.items():
+        for name, preds in test_preds_all.items():
             m = compute_all_metrics(y_test, preds)
             all_metrics[name] = m
             log_model_metrics(name, m)
             print(
-                f"[eval] {name:10s} | RMSE={m['rmse']:.4f} "
+                f"[eval] {name:12s} | RMSE={m['rmse']:.4f} "
                 f"| MAE={m['mae']:.4f} | SMAPE={m['smape']:.2f}% | R²={m['r2']:.4f}"
             )
 
-        print("[train] Fitting ensemble...")
-        ensemble = EnsembleForecaster(method=cfg["ensemble"]["method"])
-        ensemble.fit_weights(val_preds, y_val)
-        ensemble_preds = ensemble.predict(test_preds)
+        # ── Fit ensemble on the 3 selected models only ──────────────────────
+        print(f"\n[train] Fitting ensemble on: {ensemble_model_names}")
+        val_preds_ens = {k: val_preds_all[k] for k in ensemble_model_names}
+        test_preds_ens = {k: test_preds_all[k] for k in ensemble_model_names}
+
+        ensemble = EnsembleForecaster(
+            method=cfg["ensemble"]["method"],
+            min_weight=cfg["ensemble"].get("min_weight", 0.10),
+        )
+        ensemble.fit_weights(val_preds_ens, y_val)
+        ensemble_preds = ensemble.predict(test_preds_ens)
+
         ensemble_metrics = compute_all_metrics(y_test, ensemble_preds)
         all_metrics["ensemble"] = ensemble_metrics
         log_model_metrics("ensemble", ensemble_metrics)
-        mlflow.log_metrics({f"ensemble_weight_{k}": v for k, v in ensemble.get_weights().items()})
+        mlflow.log_metrics(
+            {f"ensemble_weight_{k}": v for k, v in ensemble.get_weights().items()}
+        )
         print(
-            f"[eval] {'ensemble':10s} | RMSE={ensemble_metrics['rmse']:.4f} "
+            f"[eval] {'ensemble':12s} | RMSE={ensemble_metrics['rmse']:.4f} "
             f"| MAE={ensemble_metrics['mae']:.4f} | SMAPE={ensemble_metrics['smape']:.2f}% "
             f"| R²={ensemble_metrics['r2']:.4f}"
         )
 
-        for name, obj in [
-            ("arima", arima),
-            ("ridge", ridge),
-            ("lgbm", lgbm),
-            ("xgboost", xgb_model),
-            ("ensemble", ensemble),
-        ]:
+        # ── Persist all models ───────────────────────────────────────────────
+        for name, obj in [*all_models.items(), ("ensemble", ensemble)]:
             with open(f"models/{name}.pkl", "wb") as f:
                 pickle.dump(obj, f)
 
@@ -276,7 +284,7 @@ def main(config_path: str) -> None:
                 ),
                 "y_true": y_test,
                 "y_pred": ensemble_preds,
-                **{f"y_{k}": v for k, v in test_preds.items()},
+                **{f"y_{k}": v for k, v in test_preds_all.items()},
             }
         )
         pred_df.to_csv("metrics/predictions.csv", index=False)
@@ -292,6 +300,8 @@ def main(config_path: str) -> None:
             pass
         client.create_model_version(name=model_name, source=model_uri, run_id=run_id)
         print(f"\n[train] ✓ Run ID: {run_id}")
+        print(f"[train] ✓ Ensemble members: {ensemble_model_names}")
+        print(f"[train] ✓ Ensemble weights: {ensemble.get_weights()}")
         print(f"[train] ✓ Model registered as: {model_name}")
         print("[train] ✓ Metrics saved → metrics/metrics.json")
 
