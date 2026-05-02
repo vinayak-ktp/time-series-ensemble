@@ -5,6 +5,15 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+import sys
+
+# Aliases for backwards compatibility with old pickle files
+import src.models.arima as arima
+import src.models.lgbm as lgbm
+import src.models.xgboost as xgboost
+sys.modules['src.models.arima_model'] = arima
+sys.modules['src.models.lgbm_model'] = lgbm
+sys.modules['src.models.xgboost_model'] = xgboost
 
 MODELS_DIR = os.getenv("MODELS_DIR", "models")
 

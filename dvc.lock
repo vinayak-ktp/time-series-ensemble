@@ -72,8 +72,8 @@ stages:
       size: 271976
     - path: src/features/engineering.py
       hash: md5
-      md5: 8c98773b9e9d10b60508e68327cfeb97
-      size: 3453
+      md5: 72f0fbb28a41f1c4cf14a558410ea14d
+      size: 5801
     params:
       params.yaml:
         base.target_col: OT
@@ -86,70 +86,93 @@ stages:
           - 12
           - 24
           - 48
+          - 72
           - 168
           rolling_windows:
           - 6
           - 12
           - 24
           - 168
+          ewm_spans: &id002
+          - 12
+          - 24
+          diff_pairs: &id001
+          - - 1
+            - 2
+          - - 1
+            - 24
+          - - 24
+            - 168
+          use_interactions: false
           use_time_features: true
+        features.diff_pairs: *id001
+        features.ewm_spans: *id002
+        features.use_interactions: false
     outs:
     - path: data/processed/test_features.csv
       hash: md5
-      md5: db586e25645977ce0fd4aa2d6a9a20d0
-      size: 2489109
+      md5: c2f269c7de435dfc3885ac4b61d63bcb
+      size: 2882512
     - path: data/processed/train_features.csv
       hash: md5
-      md5: ad1258716e3072ec6fec840389067eec
-      size: 8956202
+      md5: 01e4fa44ccc4fdc9204b2e40df818614
+      size: 10372323
     - path: data/processed/val_features.csv
       hash: md5
-      md5: 5ec411eab2ec1a8e62aa046546ccba8f
-      size: 1176912
+      md5: 2f087db3f0c7528b667554babc455586
+      size: 1362150
   train:
     cmd: python src/training/train.py --config params.yaml
     deps:
     - path: data/processed/test_features.csv
       hash: md5
-      md5: db586e25645977ce0fd4aa2d6a9a20d0
-      size: 2489109
+      md5: c2f269c7de435dfc3885ac4b61d63bcb
+      size: 2882512
     - path: data/processed/train_features.csv
       hash: md5
-      md5: ad1258716e3072ec6fec840389067eec
-      size: 8956202
+      md5: 01e4fa44ccc4fdc9204b2e40df818614
+      size: 10372323
     - path: data/processed/val_features.csv
       hash: md5
-      md5: 5ec411eab2ec1a8e62aa046546ccba8f
-      size: 1176912
+      md5: 2f087db3f0c7528b667554babc455586
+      size: 1362150
     - path: src/evaluation/metrics.py
       hash: md5
       md5: da0bcf8acb7a3adcba991c0a3a71e7fa
       size: 1284
     - path: src/models/
       hash: md5
-      md5: 134ac3609e1a941d57f1c4df8b422d44.dir
-      size: 38085
-      nfiles: 14
+      md5: 7e55f07160129f615854a60351380435.dir
+      size: 66200
+      nfiles: 23
     - path: src/training/train.py
       hash: md5
-      md5: b018b23d680ccd4d3393d4fba3211c7c
-      size: 9889
+      md5: e5439ef8d4fd0063484f1f92563225a4
+      size: 10563
     params:
       params.yaml:
-        arima:
-          p: 2
-          d: 1
-          q: 2
-          seasonal: false
         base:
           test_size: 0.2
           val_size: 0.1
           target_col: OT
           datetime_col: date
-        ensemble:
-          method: weighted_average
-          optimize_weights: true
-          meta_model: ridge
+        catboost:
+          n_estimators: 1000
+          learning_rate: 0.02
+          max_depth: 6
+          subsample: 0.8
+          reg_lambda: 2.0
+          min_child_samples: 20
+        extra_trees:
+          n_estimators: 300
+          max_depth: 12
+          min_samples_leaf: 4
+          max_features: 0.5
+        hybrid:
+          base_model: ridge
+          residual_models:
+          - catboost
+          - extra_trees
         lightgbm:
           n_estimators: 500
           learning_rate: 0.05
@@ -177,9 +200,9 @@ stages:
     outs:
     - path: metrics/metrics.json
       hash: md5
-      md5: 96baa64710aeba2928edd0c0f05d859e
-      size: 796
+      md5: 65cd133053edde34e234042960ca2721
+      size: 628
     - path: metrics/predictions.csv
       hash: md5
-      md5: 699503ef33ba26eae25b2f619f30bbf4
-      size: 432879
+      md5: 6e7793096133f1448031316cd5ebf904
+      size: 408331

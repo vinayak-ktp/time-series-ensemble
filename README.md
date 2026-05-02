@@ -71,10 +71,10 @@ mlops-pipeline/
 │   ├── features/
 │   │   └── engineering.py      # Lag, rolling, cyclical features
 │   ├── models/
-│   │   ├── arima_model.py
-│   │   ├── prophet_model.py
-│   │   ├── lgbm_model.py
-│   │   ├── xgboost_model.py
+│   │   ├── arima.py
+│   │   ├── prophet.py
+│   │   ├── lgbm.py
+│   │   ├── xgboost.py
 │   │   └── ensemble.py         # Weighted avg + Ridge stacking
 │   ├── training/
 │   │   └── train.py            # Orchestrator with MLflow tracking

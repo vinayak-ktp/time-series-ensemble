@@ -36,6 +36,9 @@ stages:
       - data/processed/test.csv
     params:
       - features
+      - features.ewm_spans
+      - features.diff_pairs
+      - features.use_interactions
       - base.target_col
     outs:
       - data/processed/train_features.csv
@@ -52,11 +55,12 @@ stages:
       - data/processed/val_features.csv
       - data/processed/test_features.csv
     params:
-      - arima
       - ridge
       - lightgbm
       - xgboost
-      - ensemble
+      - catboost
+      - extra_trees
+      - hybrid
       - mlflow
       - base
     metrics:

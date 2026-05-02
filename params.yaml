@@ -15,15 +15,12 @@ data:
   freq: H           # hourly
 
 features:
-  lag_periods: [1, 2, 3, 6, 12, 24, 48, 168]   # 1h to 1 week
+  lag_periods: [1, 2, 3, 6, 12, 24, 48, 72, 168]   # 1h to 1 week + 3-day lag
   rolling_windows: [6, 12, 24, 168]
+  ewm_spans: [12, 24]                                # EWM recency-weighted trend signal
+  diff_pairs: [[1, 2], [1, 24], [24, 168]]           # velocity features
+  use_interactions: false                            # disabled: causing overfitting
   use_time_features: true
-
-arima:
-  p: 2
-  d: 1
-  q: 2
-  seasonal: false
 
 ridge:
   alpha: 1.0
@@ -49,10 +46,23 @@ xgboost:
   reg_lambda: 1.0
   min_child_weight: 5
 
-ensemble:
-  method: weighted_average   # weighted_average | stacking | simple_average
-  optimize_weights: true
-  meta_model: ridge
+catboost:
+  n_estimators: 1000       # more trees for finer residual fitting
+  learning_rate: 0.02      # slower learning = better generalization
+  max_depth: 6             # back to 6 to avoid overfitting residuals
+  subsample: 0.8
+  reg_lambda: 2.0          # stronger regularization for residuals
+  min_child_samples: 20    # prevent over-specialization
+
+extra_trees:
+  n_estimators: 300
+  max_depth: 12            # bounded depth
+  min_samples_leaf: 4      # safer default
+  max_features: 0.5
+
+hybrid:
+  base_model: ridge
+  residual_models: [catboost, extra_trees]
 
 mlflow:
   experiment_name: mlops-timeseries-ensemble
