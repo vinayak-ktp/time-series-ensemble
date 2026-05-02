@@ -20,7 +20,6 @@ class ForecastPredictor:
         self.xgboost = None
         self.catboost = None
         self.extra_trees = None
-        self.ensemble = None
         self._loaded = False
 
     def load(self) -> None:
@@ -35,8 +34,6 @@ class ForecastPredictor:
                 self.catboost = pickle.load(f)
             with open(os.path.join(MODELS_DIR, "extra_trees.pkl"), "rb") as f:
                 self.extra_trees = pickle.load(f)
-            with open(os.path.join(MODELS_DIR, "ensemble.pkl"), "rb") as f:
-                self.ensemble = pickle.load(f)
             self._loaded = True
             print("[predictor] All models loaded successfully.")
         except FileNotFoundError as e:
@@ -69,32 +66,20 @@ class ForecastPredictor:
         future_dates: List[datetime],
         history: List[float],
     ) -> pd.DataFrame:
-        """
-        Build a feature matrix for the forecast horizon using real historical OT values.
-
-        Strategy: create a combined series (history + iteratively-predicted OT) to
-        compute proper lag and rolling features for each forecast step. For each
-        step t, all lags are taken from known values — either from history (for
-        t <= MIN_HISTORY) or from prior forecast steps (the model recurses using
-        its own predictions for large lags when history is shorter than needed).
-        """
         steps = len(future_dates)
-        ot_series = list(history)  # grows as we recurse through forecast steps
+        ot_series = list(history)
 
         rows = []
         for i in range(steps):
             row = {}
-            current_len = len(ot_series)  # available values before step i
+            current_len = len(ot_series)
 
-            # Lag features — taken from combined history+predictions so far
             for lag in LAG_PERIODS:
                 if lag <= current_len:
                     row[f"OT_lag_{lag}"] = ot_series[current_len - lag]
                 else:
-                    # Not enough history — use the earliest available value
                     row[f"OT_lag_{lag}"] = ot_series[0] if ot_series else 0.0
 
-            # Rolling window features
             for w in ROLLING_WINDOWS:
                 window_vals = np.array(ot_series[max(0, current_len - w) : current_len])
                 row[f"OT_roll_mean_{w}"] = float(window_vals.mean()) if len(window_vals) else 0.0
@@ -102,16 +87,12 @@ class ForecastPredictor:
                 row[f"OT_roll_min_{w}"] = float(window_vals.min()) if len(window_vals) else 0.0
                 row[f"OT_roll_max_{w}"] = float(window_vals.max()) if len(window_vals) else 0.0
 
-            # Other sensor columns — unavailable at inference time, zero-filled
             for col in ["HUFL", "HULL", "MUFL", "MULL", "LUFL", "LULL"]:
                 row[col] = 0.0
 
             row["date"] = future_dates[i]
-            row["OT"] = 0.0  # placeholder; removed before model.predict
+            row["OT"] = 0.0  # placeholder
             rows.append(row)
-
-            # Recurse: use the ensemble prediction as the next step's OT value.
-            # We append a placeholder here and overwrite after the first model pass.
             ot_series.append(0.0)
 
         feat_df = pd.DataFrame(rows)
@@ -121,11 +102,6 @@ class ForecastPredictor:
     def _build_feature_matrix_synthetic(
         self, future_dates: List[datetime], seed_value: float
     ) -> pd.DataFrame:
-        """
-        Fallback when no history is provided.
-        Builds a feature matrix using a flat extrapolation from the seed value.
-        Uses the last-known OT as a constant seed for all lag/rolling features.
-        """
         n = len(future_dates)
         seed_series = np.full(n, seed_value)
 
@@ -142,7 +118,6 @@ class ForecastPredictor:
             feat_df[col] = 0.0
         return feat_df
 
-    # Map model names (as stored by EnsembleForecaster) to loaded model objects
     def _model_map(self) -> dict:
         return {
             "ridge": self.ridge,
@@ -165,51 +140,73 @@ class ForecastPredictor:
         start_dt = datetime.fromisoformat(start_datetime)
         future_dates = [start_dt + timedelta(hours=i) for i in range(steps)]
 
-        ensemble_members = list(self.ensemble.model_names_)  # e.g. ['ridge','catboost','extra_trees']
+        # Hybrid Architecture: Ridge is base, CatBoost and ExtraTrees are residuals
+        base_model = "ridge"
+        residual_models = ["catboost", "extra_trees"]
         model_map = self._model_map()
 
         use_real_history = history is not None and len(history) > 0
         history_mode = "real" if use_real_history else "synthetic"
 
         preds_dict: dict[str, np.ndarray] = {}
+        hybrid_preds = []
 
         if use_real_history:
-            # Step-by-step recursive rollout using real historical OT
             ot_series = list(history)
-            step_preds: dict[str, list] = {name: [] for name in ensemble_members}
+            step_preds: dict[str, list] = {name: [] for name in [base_model] + residual_models}
 
             for i in range(steps):
                 feat_df = self._build_feature_matrix_from_history(
                     [future_dates[i]], ot_series
                 )
-                step_vals = {}
-                for name in ensemble_members:
-                    try:
-                        step_vals[name] = model_map[name].predict(feat_df, "OT", "date")[0]
-                    except Exception:
-                        step_vals[name] = float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
-                    step_preds[name].append(step_vals[name])
+                
+                # Base Trend Prediction
+                try:
+                    base_val = model_map[base_model].predict(feat_df, "OT", "date")[0]
+                except Exception:
+                    base_val = float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
+                step_preds[base_model].append(base_val)
 
-                # Auto-regressive rollout: use ensemble mean as next OT seed
-                next_ot = float(np.mean(list(step_vals.values())))
+                # Residual Predictions
+                res_vals = []
+                for name in residual_models:
+                    try:
+                        val = model_map[name].predict(feat_df, "OT", "date")[0]
+                        step_preds[name].append(val)
+                        res_vals.append(val)
+                    except Exception:
+                        step_preds[name].append(0.0)
+                        res_vals.append(0.0)
+                
+                # Hybrid Combo: Base + Mean(Residuals)
+                next_ot = base_val + float(np.mean(res_vals)) if res_vals else base_val
+                hybrid_preds.append(next_ot)
                 ot_series.append(next_ot)
 
             preds_dict = {name: np.array(vals) for name, vals in step_preds.items()}
 
         else:
-            # Synthetic fallback — use a constant seed (0.0) for feature matrix
             feat_df = self._build_feature_matrix_synthetic(future_dates, seed_value=0.0)
-            for name in ensemble_members:
+            
+            # Base
+            try:
+                preds_dict[base_model] = model_map[base_model].predict(feat_df, "OT", "date")
+            except Exception:
+                preds_dict[base_model] = np.zeros(steps)
+                
+            # Residuals
+            for name in residual_models:
                 try:
                     preds_dict[name] = model_map[name].predict(feat_df, "OT", "date")
                 except Exception:
                     preds_dict[name] = np.zeros(steps)
-
-        ensemble_preds = self.ensemble.predict(preds_dict)
+                    
+            hybrid_res = np.mean([preds_dict[n] for n in residual_models], axis=0)
+            hybrid_preds = preds_dict[base_model] + hybrid_res
 
         result: dict = {
             "forecast": [],
-            "ensemble_weights": self.ensemble.get_weights(),
+            "hybrid_components": {"base": base_model, "residuals": residual_models},
             "history_mode": history_mode,
         }
         if use_real_history:
@@ -218,10 +215,11 @@ class ForecastPredictor:
         for i, dt_val in enumerate(future_dates):
             point: dict = {
                 "datetime": dt_val.isoformat(),
-                "prediction": float(ensemble_preds[i]),
+                "prediction": float(hybrid_preds[i]),
             }
             if include_components:
-                for name in ensemble_members:
+                point[base_model] = float(preds_dict[base_model][i])
+                for name in residual_models:
                     point[name] = float(preds_dict[name][i])
             result["forecast"].append(point)
 

@@ -43,7 +43,7 @@ class PredictResponse(BaseModel):
     model: str
     steps: int
     forecast: List[ForecastPoint]
-    ensemble_weights: Optional[dict] = None
+    hybrid_components: Optional[dict] = None
 
 
 class HealthResponse(BaseModel):

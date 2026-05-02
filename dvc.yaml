@@ -57,7 +57,7 @@ stages:
       - xgboost
       - catboost
       - extra_trees
-      - ensemble
+      - hybrid
       - mlflow
       - base
     metrics:

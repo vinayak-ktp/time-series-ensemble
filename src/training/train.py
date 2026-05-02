@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from src.evaluation.metrics import compute_all_metrics
 from src.models.catboost_model import CatBoostForecaster
-from src.models.ensemble import EnsembleForecaster
 from src.models.extra_trees_model import ExtraTreesForecaster
 from src.models.lgbm_model import LGBMForecaster
 from src.models.linear_model import RidgeForecaster
@@ -44,7 +43,7 @@ def train_ridge(
     target_col: str,
     datetime_col: str,
 ) -> RidgeForecaster:
-    print("[train] Training Ridge...")
+    print("[train] Training Ridge (Base Trend Model)...")
     model = RidgeForecaster(alpha=cfg["ridge"]["alpha"])
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
@@ -137,21 +136,6 @@ def train_extra_trees(
     return model
 
 
-def get_predictions(
-    models: dict,
-    val_feat: pd.DataFrame,
-    test_feat: pd.DataFrame,
-    target_col: str,
-    datetime_col: str,
-) -> tuple[dict, dict]:
-    val_preds = {}
-    test_preds = {}
-    for name, model in models.items():
-        val_preds[name] = model.predict(val_feat, target_col, datetime_col)
-        test_preds[name] = model.predict(test_feat, target_col, datetime_col)
-    return val_preds, test_preds
-
-
 def log_model_metrics(model_name: str, metrics: dict, params: dict = None) -> None:
     for k, v in metrics.items():
         mlflow.log_metric(f"{model_name}_{k}", v)
@@ -175,59 +159,72 @@ def main(config_path: str) -> None:
     y_val = val_feat[target_col].values
     y_test = test_feat[target_col].values
 
-    # Models included in the final ensemble (from params.yaml)
-    ensemble_model_names: list[str] = cfg["ensemble"]["models"]
+    # Models included in the final hybrid ensemble
+    base_model_name = cfg["hybrid"]["base_model"]
+    residual_model_names = cfg["hybrid"]["residual_models"]
 
-    with mlflow.start_run(run_name="ensemble_training") as run:
+    with mlflow.start_run(run_name="hybrid_training") as run:
         mlflow.log_params(
             {
                 "horizon": cfg["data"]["horizon"],
                 "test_size": cfg["base"]["test_size"],
                 "val_size": cfg["base"]["val_size"],
-                "ensemble_method": cfg["ensemble"]["method"],
-                "ensemble_models": ",".join(ensemble_model_names),
+                "hybrid_base_model": base_model_name,
+                "hybrid_residual_models": ",".join(residual_model_names),
             }
         )
 
-        # ── Train all candidate models ──────────────────────────────────────
+        all_models = {}
+
+        # ── 1. Train Base Model (Ridge) ─────────────────────────────────────
         with mlflow.start_run(run_name="ridge", nested=True):
             ridge = train_ridge(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(ridge.get_params())
+            all_models["ridge"] = ridge
 
+        # ── 2. Calculate Residuals ──────────────────────────────────────────
+        print("\n[train] Calculating residuals from Ridge...")
+        train_ridge_preds = ridge.predict(train_feat, target_col, datetime_col)
+        val_ridge_preds = ridge.predict(val_feat, target_col, datetime_col)
+        test_ridge_preds = ridge.predict(test_feat, target_col, datetime_col)
+
+        train_res_feat = train_feat.copy()
+        train_res_feat[target_col] = train_feat[target_col] - train_ridge_preds
+
+        val_res_feat = val_feat.copy()
+        val_res_feat[target_col] = val_feat[target_col] - val_ridge_preds
+
+        # ── 3. Train Residual Models (CatBoost, ExtraTrees) ─────────────────
+        print(f"[train] Training residual models on errors: {residual_model_names}")
+        with mlflow.start_run(run_name="catboost", nested=True):
+            catboost_model = train_catboost(cfg, train_res_feat, val_res_feat, target_col, datetime_col)
+            mlflow.log_params(catboost_model.get_params())
+            all_models["catboost"] = catboost_model
+
+        with mlflow.start_run(run_name="extra_trees", nested=True):
+            et_model = train_extra_trees(cfg, train_res_feat, val_res_feat, target_col, datetime_col)
+            mlflow.log_params(et_model.get_params())
+            all_models["extra_trees"] = et_model
+
+        # Also train XGBoost/LGBM on normal target for observability, not part of hybrid
         with mlflow.start_run(run_name="lgbm", nested=True):
             lgbm = train_lgbm(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(lgbm.get_params())
+            all_models["lgbm"] = lgbm
 
         with mlflow.start_run(run_name="xgboost", nested=True):
             xgb_model = train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(xgb_model.get_params())
+            all_models["xgboost"] = xgb_model
 
-        with mlflow.start_run(run_name="catboost", nested=True):
-            catboost_model = train_catboost(cfg, train_feat, val_feat, target_col, datetime_col)
-            mlflow.log_params(catboost_model.get_params())
-
-        with mlflow.start_run(run_name="extra_trees", nested=True):
-            et_model = train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col)
-            mlflow.log_params(et_model.get_params())
-
-        # ── All trained models (for observability logging) ──────────────────
-        all_models = {
-            "ridge": ridge,
-            "lgbm": lgbm,
-            "xgboost": xgb_model,
-            "catboost": catboost_model,
-            "extra_trees": et_model,
-        }
-
-        print("\n[train] Generating predictions for all models...")
-        val_preds_all, test_preds_all = get_predictions(
-            all_models, val_feat, test_feat, target_col, datetime_col
-        )
-
-        # Log metrics for every model to MLflow (full observability)
+        # ── 4. Generate Predictions & Evaluate ──────────────────────────────
+        test_preds_all = {}
         all_metrics = {}
-        for name, preds in test_preds_all.items():
-            m = compute_all_metrics(y_test, preds)
+
+        # Evaluate models trained on normal target (Ridge, LGBM, XGBoost)
+        for name in ["ridge", "lgbm", "xgboost"]:
+            test_preds_all[name] = all_models[name].predict(test_feat, target_col, datetime_col)
+            m = compute_all_metrics(y_test, test_preds_all[name])
             all_metrics[name] = m
             log_model_metrics(name, m)
             print(
@@ -235,32 +232,29 @@ def main(config_path: str) -> None:
                 f"| MAE={m['mae']:.4f} | SMAPE={m['smape']:.2f}% | R²={m['r2']:.4f}"
             )
 
-        # ── Fit ensemble on the 3 selected models only ──────────────────────
-        print(f"\n[train] Fitting ensemble on: {ensemble_model_names}")
-        val_preds_ens = {k: val_preds_all[k] for k in ensemble_model_names}
-        test_preds_ens = {k: test_preds_all[k] for k in ensemble_model_names}
+        # Generate residual predictions from CatBoost and ExtraTrees
+        test_cat_res = all_models["catboost"].predict(test_feat, target_col, datetime_col)
+        test_et_res = all_models["extra_trees"].predict(test_feat, target_col, datetime_col)
+        test_preds_all["catboost_residuals"] = test_cat_res
+        test_preds_all["extra_trees_residuals"] = test_et_res
 
-        ensemble = EnsembleForecaster(
-            method=cfg["ensemble"]["method"],
-            min_weight=cfg["ensemble"].get("min_weight", 0.10),
-        )
-        ensemble.fit_weights(val_preds_ens, y_val)
-        ensemble_preds = ensemble.predict(test_preds_ens)
+        # ── 5. Hybrid Prediction (Ridge + Average of Residuals) ─────────────
+        hybrid_res = (test_cat_res + test_et_res) / 2
+        hybrid_preds = test_ridge_preds + hybrid_res
 
-        ensemble_metrics = compute_all_metrics(y_test, ensemble_preds)
-        all_metrics["ensemble"] = ensemble_metrics
-        log_model_metrics("ensemble", ensemble_metrics)
-        mlflow.log_metrics(
-            {f"ensemble_weight_{k}": v for k, v in ensemble.get_weights().items()}
-        )
+        hybrid_metrics = compute_all_metrics(y_test, hybrid_preds)
+        all_metrics["hybrid"] = hybrid_metrics
+        log_model_metrics("hybrid", hybrid_metrics)
         print(
-            f"[eval] {'ensemble':12s} | RMSE={ensemble_metrics['rmse']:.4f} "
-            f"| MAE={ensemble_metrics['mae']:.4f} | SMAPE={ensemble_metrics['smape']:.2f}% "
-            f"| R²={ensemble_metrics['r2']:.4f}"
+            f"[eval] {'hybrid':12s} | RMSE={hybrid_metrics['rmse']:.4f} "
+            f"| MAE={hybrid_metrics['mae']:.4f} | SMAPE={hybrid_metrics['smape']:.2f}% "
+            f"| R²={hybrid_metrics['r2']:.4f}"
         )
 
         # ── Persist all models ───────────────────────────────────────────────
-        for name, obj in [*all_models.items(), ("ensemble", ensemble)]:
+        # Note: We only persist the models needed for the hybrid, or all of them if preferred.
+        # Let's save all for consistency.
+        for name, obj in all_models.items():
             with open(f"models/{name}.pkl", "wb") as f:
                 pickle.dump(obj, f)
 
@@ -283,8 +277,10 @@ def main(config_path: str) -> None:
                     else range(len(y_test))
                 ),
                 "y_true": y_test,
-                "y_pred": ensemble_preds,
-                **{f"y_{k}": v for k, v in test_preds_all.items()},
+                "y_hybrid": hybrid_preds,
+                "y_ridge": test_preds_all["ridge"],
+                "y_catboost_res": test_cat_res,
+                "y_extra_trees_res": test_et_res,
             }
         )
         pred_df.to_csv("metrics/predictions.csv", index=False)
@@ -293,15 +289,16 @@ def main(config_path: str) -> None:
         run_id = run.info.run_id
         model_uri = f"runs:/{run_id}/models"
         client = MlflowClient()
-        model_name = cfg["mlflow"]["experiment_name"] + "-ensemble"
+        model_name = cfg["mlflow"]["experiment_name"] + "-hybrid"
         try:
             client.create_registered_model(model_name)
         except Exception:
             pass
         client.create_model_version(name=model_name, source=model_uri, run_id=run_id)
+        
         print(f"\n[train] ✓ Run ID: {run_id}")
-        print(f"[train] ✓ Ensemble members: {ensemble_model_names}")
-        print(f"[train] ✓ Ensemble weights: {ensemble.get_weights()}")
+        print(f"[train] ✓ Hybrid Base: {base_model_name}")
+        print(f"[train] ✓ Hybrid Residuals: {residual_model_names}")
         print(f"[train] ✓ Model registered as: {model_name}")
         print("[train] ✓ Metrics saved → metrics/metrics.json")
 

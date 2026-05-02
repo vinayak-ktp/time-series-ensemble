@@ -72,7 +72,9 @@ class TestModelsEndpoint:
         assert "all_trained_models" in data
         assert len(data["all_trained_models"]) == 5
 
-    def test_models_lists_ensemble_members(self, client):
+    def test_models_lists_hybrid_components(self, client):
         data = client.get("/models").json()
-        assert "ensemble_members" in data
-        assert len(data["ensemble_members"]) == 3
+        assert "hybrid_base" in data
+        assert "hybrid_residuals" in data
+        assert data["hybrid_base"] == "ridge"
+        assert len(data["hybrid_residuals"]) == 2

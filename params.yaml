@@ -58,11 +58,9 @@ extra_trees:
   min_samples_leaf: 4
   max_features: 0.5
 
-ensemble:
-  method: weighted_average   # weighted_average | stacking | simple_average
-  optimize_weights: true
-  min_weight: 0.10           # minimum weight per ensemble member (prevents collapse)
-  models: [ridge, catboost, extra_trees]   # 3 models with diverse inductive biases
+hybrid:
+  base_model: ridge
+  residual_models: [catboost, extra_trees]
 
 mlflow:
   experiment_name: mlops-timeseries-ensemble

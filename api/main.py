@@ -27,8 +27,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MLOps Time Series Ensemble API",
     description=(
-        "Forecast API serving an ensemble of Ridge, CatBoost, and ExtraTrees "
-        "models trained on the ETTh1 (Electricity Transformer Temperature) dataset. "
+        "Forecast API serving a Hybrid architecture of Ridge (base trend) and "
+        "CatBoost + ExtraTrees (residuals) models trained on the ETTh1 dataset. "
         "LightGBM and XGBoost are also trained and tracked in MLflow for observability."
     ),
     version=APP_VERSION,
@@ -81,7 +81,7 @@ async def predict(request: PredictRequest):
         model=MODEL_NAME,
         steps=request.steps,
         forecast=[ForecastPoint(**pt) for pt in result["forecast"]],
-        ensemble_weights=result.get("ensemble_weights"),
+        hybrid_components=result.get("hybrid_components"),
     )
 
 
@@ -100,11 +100,10 @@ async def get_metrics():
 
 @app.get("/models", tags=["monitoring"])
 async def list_models():
-    ens = predictor.ensemble
     return {
-        "ensemble_method": ens.method if ens else None,
-        "ensemble_weights": ens.get_weights() if ens else {},
-        "ensemble_members": list(ens.model_names_) if ens and ens.model_names_ else [],
+        "architecture": "hybrid_residual",
+        "hybrid_base": "ridge",
+        "hybrid_residuals": ["catboost", "extra_trees"],
         "all_trained_models": ["ridge", "lgbm", "xgboost", "catboost", "extra_trees"],
         "loaded": predictor.is_loaded,
     }
