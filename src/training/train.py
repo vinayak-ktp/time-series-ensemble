@@ -163,15 +163,11 @@ def main(config_path):
         # ── 3. Train Residual Models on ridge errors ─────────────────────────
         print(f"[train] Training residual models on errors: {residual_model_names}")
         with mlflow.start_run(run_name="catboost", nested=True):
-            catboost_model = train_catboost(
-                cfg, train_res_feat, val_res_feat, target_col, datetime_col
-            )
+            catboost_model = train_catboost(cfg, train_res_feat, val_res_feat, target_col, datetime_col)
             mlflow.log_params(catboost_model.get_params())
 
         with mlflow.start_run(run_name="extra_trees", nested=True):
-            et_model = train_extra_trees(
-                cfg, train_res_feat, target_col, datetime_col
-            )
+            et_model = train_extra_trees(cfg, train_res_feat, target_col, datetime_col)
             mlflow.log_params(et_model.get_params())
 
         # Observability models (trained on original target)
@@ -181,19 +177,19 @@ def main(config_path):
             all_models["lgbm"] = lgbm
 
         with mlflow.start_run(run_name="xgboost", nested=True):
-            xgb_model = train_xgboost(
-                cfg, train_feat, val_feat, target_col, datetime_col
-            )
+            xgb_model = train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col)
             mlflow.log_params(xgb_model.get_params())
             all_models["xgboost"] = xgb_model
 
         # ── 4. Evaluate all models ───────────────────────────────────────────
         print("\n[train] Evaluating models...")
         all_metrics = {}
-        all_models.update({
-            "catboost": catboost_model,
-            "extra_trees": et_model,
-        })
+        all_models.update(
+            {
+                "catboost": catboost_model,
+                "extra_trees": et_model,
+            }
+        )
 
         for name in ["ridge", "lgbm", "xgboost"]:
             preds = all_models[name].predict(test_feat)
@@ -228,21 +224,13 @@ def main(config_path):
         mlflow.log_artifacts("models", artifact_path="models")
         mlflow.log_artifact(config_path)
 
-        flat_metrics = {
-            f"{mn}_{k}": round(float(v), 6)
-            for mn, mets in all_metrics.items()
-            for k, v in mets.items()
-        }
+        flat_metrics = {f"{mn}_{k}": round(float(v), 6) for mn, mets in all_metrics.items() for k, v in mets.items()}
         with open("metrics/metrics.json", "w") as f:
             json.dump(flat_metrics, f, indent=2)
 
         pred_df = pd.DataFrame(
             {
-                "ds": (
-                    test_feat[datetime_col].values
-                    if datetime_col in test_feat.columns
-                    else range(len(y_test))
-                ),
+                "ds": (test_feat[datetime_col].values if datetime_col in test_feat.columns else range(len(y_test))),
                 "y_true": y_test,
                 "y_hybrid": hybrid_preds,
                 "y_ridge": test_ridge_preds,
@@ -260,9 +248,7 @@ def main(config_path):
             client.create_registered_model(model_name)
         except Exception:
             pass
-        client.create_model_version(
-            name=model_name, source=f"runs:/{run_id}/models", run_id=run_id
-        )
+        client.create_model_version(name=model_name, source=f"runs:/{run_id}/models", run_id=run_id)
         print(f"\n[train] ✓ Run ID: {run_id}")
         print(f"[train] ✓ Hybrid Base: {base_model_name}")
         print(f"[train] ✓ Hybrid Residuals: {residual_model_names}")

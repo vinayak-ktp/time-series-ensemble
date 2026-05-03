@@ -96,15 +96,11 @@ class TestTimeFeatures:
 
 class TestFeaturize:
     def test_drops_nan_rows(self, sample_df):
-        df_feat = featurize(
-            sample_df, "OT", "date", [1, 168], [24], use_time_features=True
-        )
+        df_feat = featurize(sample_df, "OT", "date", [1, 168], [24], use_time_features=True)
         assert not df_feat.isnull().any().any()
 
     def test_feature_count_increases(self, sample_df):
-        df_feat = featurize(
-            sample_df, "OT", "date", [1, 2], [6], use_time_features=True
-        )
+        df_feat = featurize(sample_df, "OT", "date", [1, 2], [6], use_time_features=True)
         assert len(df_feat.columns) > len(sample_df.columns)
 
 

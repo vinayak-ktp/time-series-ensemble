@@ -32,9 +32,7 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
         self.feature_names_ = None
 
     def _get_feature_matrix(self, df, target_col, datetime_col):
-        drop_cols = (
-            [target_col, datetime_col] if datetime_col in df.columns else [target_col]
-        )
+        drop_cols = [target_col, datetime_col] if datetime_col in df.columns else [target_col]
         X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
         y = df[target_col].values
         feature_names = [c for c in df.columns if c not in drop_cols]
@@ -47,9 +45,7 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
         target_col,
         datetime_col,
     ):
-        X_train, y_train, feat_names = self._get_feature_matrix(
-            train_df, target_col, datetime_col
-        )
+        X_train, y_train, feat_names = self._get_feature_matrix(train_df, target_col, datetime_col)
         X_val, y_val, _ = self._get_feature_matrix(val_df, target_col, datetime_col)
         self.feature_names_ = feat_names
 

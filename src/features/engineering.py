@@ -25,9 +25,7 @@ def make_rolling_features(df, target_col, windows):
 def make_ewm_features(df, target_col, spans):
     """Exponentially weighted mean — recency-weighted trend signal for tree residual models."""
     for span in spans:
-        df[f"{target_col}_ewm_{span}"] = (
-            df[target_col].shift(1).ewm(span=span, adjust=False).mean()
-        )
+        df[f"{target_col}_ewm_{span}"] = df[target_col].shift(1).ewm(span=span, adjust=False).mean()
     return df
 
 
@@ -65,20 +63,12 @@ def make_interaction_features(df, target_col):
     These are particularly effective for residual correction in the hybrid architecture.
     """
     if "hour_sin" in df.columns and f"{target_col}_roll_mean_24" in df.columns:
-        df[f"{target_col}_hour_sin_x_mean24"] = (
-            df["hour_sin"] * df[f"{target_col}_roll_mean_24"]
-        )
-        df[f"{target_col}_hour_cos_x_mean24"] = (
-            df["hour_cos"] * df[f"{target_col}_roll_mean_24"]
-        )
+        df[f"{target_col}_hour_sin_x_mean24"] = df["hour_sin"] * df[f"{target_col}_roll_mean_24"]
+        df[f"{target_col}_hour_cos_x_mean24"] = df["hour_cos"] * df[f"{target_col}_roll_mean_24"]
     if "is_weekend" in df.columns and f"{target_col}_lag_24" in df.columns:
-        df[f"{target_col}_weekend_x_lag24"] = (
-            df["is_weekend"] * df[f"{target_col}_lag_24"]
-        )
+        df[f"{target_col}_weekend_x_lag24"] = df["is_weekend"] * df[f"{target_col}_lag_24"]
     if "dow_sin" in df.columns and f"{target_col}_roll_mean_24" in df.columns:
-        df[f"{target_col}_dow_sin_x_mean24"] = (
-            df["dow_sin"] * df[f"{target_col}_roll_mean_24"]
-        )
+        df[f"{target_col}_dow_sin_x_mean24"] = df["dow_sin"] * df[f"{target_col}_roll_mean_24"]
     return df
 
 
@@ -154,10 +144,7 @@ def main(config_path):
             use_interactions,
         )
         df_feat.to_csv(out_path, index=False)
-        print(
-            f"[featurize] {split_name}: {len(df_feat)} rows, "
-            f"{len(df_feat.columns)} features → {out_path}"
-        )
+        print(f"[featurize] {split_name}: {len(df_feat)} rows, " f"{len(df_feat.columns)} features → {out_path}")
 
 
 if __name__ == "__main__":

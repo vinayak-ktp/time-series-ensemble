@@ -24,9 +24,7 @@ class ExtraTreesForecaster:
         target_col,
         datetime_col,
     ):
-        feature_cols = [
-            c for c in train_feat.columns if c not in [target_col, datetime_col]
-        ]
+        feature_cols = [c for c in train_feat.columns if c not in [target_col, datetime_col]]
         self._feature_cols = feature_cols
 
         X_train = train_feat[feature_cols].values

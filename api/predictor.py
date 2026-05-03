@@ -91,18 +91,10 @@ class ForecastPredictor:
 
             for w in ROLLING_WINDOWS:
                 window_vals = np.array(ot_series[max(0, current_len - w) : current_len])
-                row[f"OT_roll_mean_{w}"] = (
-                    float(window_vals.mean()) if len(window_vals) else 0.0
-                )
-                row[f"OT_roll_std_{w}"] = (
-                    float(window_vals.std()) if len(window_vals) > 1 else 0.0
-                )
-                row[f"OT_roll_min_{w}"] = (
-                    float(window_vals.min()) if len(window_vals) else 0.0
-                )
-                row[f"OT_roll_max_{w}"] = (
-                    float(window_vals.max()) if len(window_vals) else 0.0
-                )
+                row[f"OT_roll_mean_{w}"] = float(window_vals.mean()) if len(window_vals) else 0.0
+                row[f"OT_roll_std_{w}"] = float(window_vals.std()) if len(window_vals) > 1 else 0.0
+                row[f"OT_roll_min_{w}"] = float(window_vals.min()) if len(window_vals) else 0.0
+                row[f"OT_roll_max_{w}"] = float(window_vals.max()) if len(window_vals) else 0.0
 
             for col in ["HUFL", "HULL", "MUFL", "MULL", "LUFL", "LULL"]:
                 row[col] = 0.0
@@ -171,17 +163,13 @@ class ForecastPredictor:
             step_preds = {name: [] for name in [base_model] + residual_models}
 
             for i in range(steps):
-                feat_df = self._build_feature_matrix_from_history(
-                    [future_dates[i]], ot_series
-                )
+                feat_df = self._build_feature_matrix_from_history([future_dates[i]], ot_series)
 
                 # Base Trend Prediction
                 try:
                     base_val = model_map[base_model].predict(feat_df)[0]
                 except Exception:
-                    base_val = (
-                        float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
-                    )
+                    base_val = float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
                 step_preds[base_model].append(base_val)
 
                 # Residual Predictions

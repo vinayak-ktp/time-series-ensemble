@@ -45,23 +45,17 @@ class TestPredictEndpoint:
         original = pred_module.predictor._loaded
         pred_module.predictor._loaded = False
         try:
-            resp = client.post(
-                "/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 5}
-            )
+            resp = client.post("/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 5})
             assert resp.status_code == 503
         finally:
             pred_module.predictor._loaded = original
 
     def test_predict_invalid_steps(self, client):
-        resp = client.post(
-            "/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 0}
-        )
+        resp = client.post("/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 0})
         assert resp.status_code == 422
 
     def test_predict_too_many_steps(self, client):
-        resp = client.post(
-            "/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 9999}
-        )
+        resp = client.post("/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 9999})
         assert resp.status_code == 422
 
 

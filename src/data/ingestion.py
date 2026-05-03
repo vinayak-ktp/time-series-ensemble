@@ -5,9 +5,7 @@ import urllib.request
 import pandas as pd
 import yaml
 
-ETT_URL = (
-    "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/ETT-small/ETTh1.csv"
-)
+ETT_URL = "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/ETT-small/ETTh1.csv"
 
 
 def download_dataset(url, dest_path):

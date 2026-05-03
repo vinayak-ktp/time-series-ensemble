@@ -32,9 +32,7 @@ class ProphetForecaster:
         self._last_ds = None
 
     def fit(self, df, datetime_col, target_col):
-        prophet_df = df[[datetime_col, target_col]].rename(
-            columns={datetime_col: "ds", target_col: "y"}
-        )
+        prophet_df = df[[datetime_col, target_col]].rename(columns={datetime_col: "ds", target_col: "y"})
         self.model_ = Prophet(
             changepoint_prior_scale=self.changepoint_prior_scale,
             seasonality_prior_scale=self.seasonality_prior_scale,

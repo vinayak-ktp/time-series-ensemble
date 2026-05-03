@@ -23,9 +23,7 @@ def chronological_split(df, test_size, val_size):
     val = df.iloc[n_train : n_train + n_val].copy()
     test = df.iloc[n_train + n_val :].copy()
 
-    print(
-        f"[preprocess] Split sizes — train: {len(train)}, val: {len(val)}, test: {len(test)}"
-    )
+    print(f"[preprocess] Split sizes — train: {len(train)}, val: {len(val)}, test: {len(test)}")
     return train, val, test
 
 
