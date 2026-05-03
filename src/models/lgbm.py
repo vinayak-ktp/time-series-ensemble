@@ -76,11 +76,8 @@ class LGBMForecaster(BaseEstimator, RegressorMixin):
         )
         return self
 
-    def predict(self, df, target_col, datetime_col):
-        drop_cols = (
-            [target_col, datetime_col] if datetime_col in df.columns else [target_col]
-        )
-        X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
+    def predict(self, df):
+        X = df[self.feature_names_].values
         return self.model_.predict(X)
 
     def get_params(self, deep=True):

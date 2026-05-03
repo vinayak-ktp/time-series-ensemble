@@ -21,7 +21,6 @@ class ExtraTreesForecaster:
     def fit(
         self,
         train_feat,
-        val_feat,
         target_col,
         datetime_col,
     ):
@@ -44,7 +43,7 @@ class ExtraTreesForecaster:
         self.model_.fit(X_train, y_train)
         return self
 
-    def predict(self, df, target_col, datetime_col):
+    def predict(self, df):
         X = df[self._feature_cols].values
         return self.model_.predict(X)
 

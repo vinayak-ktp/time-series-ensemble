@@ -15,7 +15,6 @@ class RidgeForecaster:
     def fit(
         self,
         train_df,
-        val_df,
         target_col,
         datetime_col,
     ):
@@ -27,12 +26,7 @@ class RidgeForecaster:
         self.model_.fit(X_scaled, y_train)
         return self
 
-    def predict(
-        self,
-        df,
-        target_col,
-        datetime_col,
-    ):
+    def predict(self, df):
         X = df[self._feature_cols].values
         X_scaled = self.scaler_.transform(X)
         return self.model_.predict(X_scaled)

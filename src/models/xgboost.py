@@ -75,12 +75,9 @@ class XGBForecaster(BaseEstimator, RegressorMixin):
         )
         return self
 
-    def predict(self, df, target_col, datetime_col):
-        drop_cols = (
-            [target_col, datetime_col] if datetime_col in df.columns else [target_col]
-        )
-        X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
-        feat_names = [c for c in df.columns if c not in drop_cols]
+    def predict(self, df):
+        X = df[self.feature_names_].values
+        feat_names = self.feature_names_
         dtest = xgb.DMatrix(X, feature_names=feat_names)
         return self.model_.predict(dtest)
 

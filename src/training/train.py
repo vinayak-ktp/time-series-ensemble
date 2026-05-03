@@ -16,12 +16,12 @@ warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from src.evaluation.metrics import compute_all_metrics
-from src.models.catboost import CatBoostForecaster
-from src.models.extra_trees import ExtraTreesForecaster
-from src.models.lgbm import LGBMForecaster
-from src.models.linear import RidgeForecaster
-from src.models.xgboost import XGBForecaster
+from src.evaluation.metrics import compute_all_metrics  # noqa: E402
+from src.models.catboost import CatBoostForecaster  # noqa: E402
+from src.models.extra_trees import ExtraTreesForecaster  # noqa: E402
+from src.models.lgbm import LGBMForecaster  # noqa: E402
+from src.models.linear import RidgeForecaster  # noqa: E402
+from src.models.xgboost import XGBForecaster  # noqa: E402
 
 
 def load_data(cfg):
@@ -33,26 +33,26 @@ def load_data(cfg):
     return train_feat, val_feat, test_feat, target_col, datetime_col
 
 
-def train_ridge(cfg, train_feat, val_feat, target_col, datetime_col):
+def train_ridge(cfg, train_feat, target_col, datetime_col):
     print("[train] Training Ridge (Base Trend Model)...")
     model = RidgeForecaster(alpha=cfg["ridge"]["alpha"])
-    model.fit(train_feat, val_feat, target_col, datetime_col)
+    model.fit(train_feat, target_col, datetime_col)
     return model
 
 
 def train_lgbm(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training LightGBM...")
-    l = cfg["lightgbm"]
+    lgbm_cfg = cfg["lightgbm"]
     model = LGBMForecaster(
-        n_estimators=l["n_estimators"],
-        learning_rate=l["learning_rate"],
-        max_depth=l["max_depth"],
-        num_leaves=l["num_leaves"],
-        min_child_samples=l["min_child_samples"],
-        subsample=l["subsample"],
-        colsample_bytree=l["colsample_bytree"],
-        reg_alpha=l["reg_alpha"],
-        reg_lambda=l["reg_lambda"],
+        n_estimators=lgbm_cfg["n_estimators"],
+        learning_rate=lgbm_cfg["learning_rate"],
+        max_depth=lgbm_cfg["max_depth"],
+        num_leaves=lgbm_cfg["num_leaves"],
+        min_child_samples=lgbm_cfg["min_child_samples"],
+        subsample=lgbm_cfg["subsample"],
+        colsample_bytree=lgbm_cfg["colsample_bytree"],
+        reg_alpha=lgbm_cfg["reg_alpha"],
+        reg_lambda=lgbm_cfg["reg_lambda"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
@@ -90,7 +90,7 @@ def train_catboost(cfg, train_feat, val_feat, target_col, datetime_col):
     return model
 
 
-def train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col):
+def train_extra_trees(cfg, train_feat, target_col, datetime_col):
     print("[train] Training Extra Trees (Residual Model)...")
     et = cfg["extra_trees"]
     model = ExtraTreesForecaster(
@@ -99,7 +99,7 @@ def train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col):
         min_samples_leaf=et["min_samples_leaf"],
         max_features=et["max_features"],
     )
-    model.fit(train_feat, val_feat, target_col, datetime_col)
+    model.fit(train_feat, target_col, datetime_col)
     return model
 
 
@@ -128,6 +128,8 @@ def main(config_path):
     base_model_name = cfg["hybrid"]["base_model"]
     residual_model_names = cfg["hybrid"]["residual_models"]
 
+    all_models = {}
+
     with mlflow.start_run(run_name="hybrid_training") as run:
         mlflow.log_params(
             {
@@ -143,15 +145,15 @@ def main(config_path):
 
         # ── 1. Train Base Model (Ridge on original target) ──────────────────
         with mlflow.start_run(run_name="ridge", nested=True):
-            ridge = train_ridge(cfg, train_feat, val_feat, target_col, datetime_col)
+            ridge = train_ridge(cfg, train_feat, target_col, datetime_col)
             mlflow.log_params(ridge.get_params())
             all_models["ridge"] = ridge
 
         # ── 2. Compute residuals ─────────────────────────────────────────────
         print("\n[train] Computing Ridge residuals...")
-        train_ridge_preds = ridge.predict(train_feat, target_col, datetime_col)
-        val_ridge_preds = ridge.predict(val_feat, target_col, datetime_col)
-        test_ridge_preds = ridge.predict(test_feat, target_col, datetime_col)
+        train_ridge_preds = ridge.predict(train_feat)
+        val_ridge_preds = ridge.predict(val_feat)
+        test_ridge_preds = ridge.predict(test_feat)
 
         train_res_feat = train_feat.copy()
         train_res_feat[target_col] = train_feat[target_col] - train_ridge_preds
@@ -168,7 +170,7 @@ def main(config_path):
 
         with mlflow.start_run(run_name="extra_trees", nested=True):
             et_model = train_extra_trees(
-                cfg, train_res_feat, val_res_feat, target_col, datetime_col
+                cfg, train_res_feat, target_col, datetime_col
             )
             mlflow.log_params(et_model.get_params())
 
@@ -188,16 +190,13 @@ def main(config_path):
         # ── 4. Evaluate all models ───────────────────────────────────────────
         print("\n[train] Evaluating models...")
         all_metrics = {}
-        all_models = {
-            "ridge": ridge,
-            "lgbm": lgbm,
-            "xgboost": xgb_model,
+        all_models.update({
             "catboost": catboost_model,
             "extra_trees": et_model,
-        }
+        })
 
         for name in ["ridge", "lgbm", "xgboost"]:
-            preds = all_models[name].predict(test_feat, target_col, datetime_col)
+            preds = all_models[name].predict(test_feat)
             m = compute_all_metrics(y_test, preds)
             all_metrics[name] = m
             log_model_metrics(name, m)
@@ -207,8 +206,8 @@ def main(config_path):
             )
 
         # ── 5. Hybrid prediction: Ridge base + avg(residual models) ─────────
-        test_cat_res = catboost_model.predict(test_feat, target_col, datetime_col)
-        test_et_res = et_model.predict(test_feat, target_col, datetime_col)
+        test_cat_res = catboost_model.predict(test_feat)
+        test_et_res = et_model.predict(test_feat)
         hybrid_res = (test_cat_res + test_et_res) / 2
         hybrid_preds = test_ridge_preds + hybrid_res
 

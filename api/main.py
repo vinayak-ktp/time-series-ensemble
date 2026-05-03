@@ -10,6 +10,7 @@ from api.schemas import (
     ForecastPoint,
     HealthResponse,
     MetricsResponse,
+    PredictRequest,
     PredictResponse,
 )
 
@@ -69,7 +70,7 @@ async def health():
     response_model_exclude_none=True,
     tags=["forecast"],
 )
-async def predict(request):
+async def predict(request: PredictRequest):
     if not predictor.is_loaded:
         raise HTTPException(
             status_code=503,

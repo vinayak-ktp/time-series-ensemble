@@ -177,7 +177,7 @@ class ForecastPredictor:
 
                 # Base Trend Prediction
                 try:
-                    base_val = model_map[base_model].predict(feat_df, "OT", "date")[0]
+                    base_val = model_map[base_model].predict(feat_df)[0]
                 except Exception:
                     base_val = (
                         float(np.mean(list(ot_series[-6:]))) if ot_series else 0.0
@@ -188,7 +188,7 @@ class ForecastPredictor:
                 res_vals = []
                 for name in residual_models:
                     try:
-                        val = model_map[name].predict(feat_df, "OT", "date")[0]
+                        val = model_map[name].predict(feat_df)[0]
                         step_preds[name].append(val)
                         res_vals.append(val)
                     except Exception:
@@ -207,16 +207,14 @@ class ForecastPredictor:
 
             # Base
             try:
-                preds_dict[base_model] = model_map[base_model].predict(
-                    feat_df, "OT", "date"
-                )
+                preds_dict[base_model] = model_map[base_model].predict(feat_df)
             except Exception:
                 preds_dict[base_model] = np.zeros(steps)
 
             # Residuals
             for name in residual_models:
                 try:
-                    preds_dict[name] = model_map[name].predict(feat_df, "OT", "date")
+                    preds_dict[name] = model_map[name].predict(feat_df)
                 except Exception:
                     preds_dict[name] = np.zeros(steps)
 

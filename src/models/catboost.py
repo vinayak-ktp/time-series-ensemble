@@ -53,7 +53,7 @@ class CatBoostForecaster:
         self.model_.fit(X_train, y_train, eval_set=(X_val, y_val))
         return self
 
-    def predict(self, df, target_col, datetime_col):
+    def predict(self, df):
         X = df[self._feature_cols].values
         return self.model_.predict(X)
 
