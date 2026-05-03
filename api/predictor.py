@@ -1,10 +1,10 @@
 import os
 import pickle
+import sys
 from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import sys
 
 # Aliases for backwards compatibility with old pickle files
 import src.models.arima as arima

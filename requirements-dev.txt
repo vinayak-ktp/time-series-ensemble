@@ -1,5 +1,4 @@
-mlflow
-dvc
+# Development / CI test dependencies (no DVC to avoid antlr4/omegaconf conflict)
 fastapi
 uvicorn[standard]
 httpx
@@ -9,7 +8,6 @@ pydantic-settings
 scikit-learn
 pandas
 numpy
-statsmodels
 lightgbm
 xgboost
 catboost
@@ -17,8 +15,10 @@ pyarrow
 tqdm
 pyyaml
 requests
+statsmodels
+mlflow
 pytest
 pytest-cov
-pre-commit
-# Pin antlr4 to avoid omegaconf/hydra version conflict that breaks pytest
-antlr4-python3-runtime==4.13.2
+flake8
+black
+isort

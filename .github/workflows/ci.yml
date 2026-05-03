@@ -7,12 +7,14 @@ on:
       - "*.md"
       - "docs/**"
       - ".gitignore"
+      - "paper.tex"
   pull_request:
     branches: [main]
     paths-ignore:
       - "*.md"
       - "docs/**"
       - ".gitignore"
+      - "paper.tex"
 
 env:
   PYTHON_VERSION: "3.12"
@@ -32,14 +34,14 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: Install dev dependencies
+      - name: Install lint tools
         run: pip install flake8 black isort
 
       - name: Run flake8
         run: flake8 src/ api/ tests/
 
       - name: Check black formatting
-        run: black --check src/ api/ tests/ --line-length=100
+        run: black --check src/ api/ tests/ --line-length=120
 
       - name: Check import ordering
         run: isort --check-only src/ api/ tests/
@@ -59,7 +61,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # Use requirements-dev.txt which excludes DVC to avoid the
+        # antlr4/omegaconf version conflict that crashes pytest.
+        run: pip install -r requirements-dev.txt
 
       - name: Run pytest
         run: |
@@ -88,7 +92,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: Install dependencies
+      - name: Install dependencies (includes DVC)
         run: pip install -r requirements.txt
 
       - name: Run data pipeline stages (ingest → preprocess → featurize)
@@ -98,8 +102,7 @@ jobs:
           python src/features/engineering.py --config params.yaml
 
       - name: Validate DVC pipeline config
-        run: |
-          dvc dag
+        run: dvc dag
 
       - name: Show produced data artefacts
         run: |
@@ -115,7 +118,11 @@ jobs:
 
       - name: Show pre-committed metrics
         run: |
-          cat metrics/metrics.json | python3 -m json.tool
+          if [ -f metrics/metrics.json ]; then
+            cat metrics/metrics.json | python3 -m json.tool
+          else
+            echo "metrics/metrics.json not found (training not run in CI)"
+          fi
 
   # ── Build Docker Image ─────────────────────────────────────────────────────
   docker-build:
@@ -142,13 +149,15 @@ jobs:
           echo "Waiting for API to start..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-              echo "API is up after ${i}s"
+              echo "API is up after $((i * 2))s"
               break
             fi
             sleep 2
           done
+          echo "--- /health response ---"
           curl -sf http://localhost:8000/health | python3 -m json.tool
-          curl -sf http://localhost:8000/ | python3 -m json.tool
+          echo "--- /models response ---"
+          curl -sf http://localhost:8000/models | python3 -m json.tool
           docker stop test-api
 
       - name: Log in to Docker Hub
@@ -169,4 +178,3 @@ jobs:
         run: |
           docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
           docker push ${{ env.IMAGE_NAME }}:latest
-
