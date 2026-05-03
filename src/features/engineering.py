@@ -6,13 +6,13 @@ import pandas as pd
 import yaml
 
 
-def make_lag_features(df: pd.DataFrame, target_col: str, lag_periods: list[int]) -> pd.DataFrame:
+def make_lag_features(df, target_col, lag_periods):
     for lag in lag_periods:
         df[f"{target_col}_lag_{lag}"] = df[target_col].shift(lag)
     return df
 
 
-def make_rolling_features(df: pd.DataFrame, target_col: str, windows: list[int]) -> pd.DataFrame:
+def make_rolling_features(df, target_col, windows):
     for w in windows:
         shifted = df[target_col].shift(1)
         df[f"{target_col}_roll_mean_{w}"] = shifted.rolling(w).mean()
@@ -22,14 +22,16 @@ def make_rolling_features(df: pd.DataFrame, target_col: str, windows: list[int])
     return df
 
 
-def make_ewm_features(df: pd.DataFrame, target_col: str, spans: list[int]) -> pd.DataFrame:
+def make_ewm_features(df, target_col, spans):
     """Exponentially weighted mean — recency-weighted trend signal for tree residual models."""
     for span in spans:
-        df[f"{target_col}_ewm_{span}"] = df[target_col].shift(1).ewm(span=span, adjust=False).mean()
+        df[f"{target_col}_ewm_{span}"] = (
+            df[target_col].shift(1).ewm(span=span, adjust=False).mean()
+        )
     return df
 
 
-def make_diff_features(df: pd.DataFrame, target_col: str, lag_pairs: list[tuple]) -> pd.DataFrame:
+def make_diff_features(df, target_col, lag_pairs):
     """Velocity/direction features: lag_a - lag_b. Models rate of change explicitly."""
     for a, b in lag_pairs:
         col_a = f"{target_col}_lag_{a}"
@@ -39,7 +41,7 @@ def make_diff_features(df: pd.DataFrame, target_col: str, lag_pairs: list[tuple]
     return df
 
 
-def make_time_features(df: pd.DataFrame, datetime_col: str) -> pd.DataFrame:
+def make_time_features(df, datetime_col):
     dt = pd.to_datetime(df[datetime_col])
     df["hour"] = dt.dt.hour
     df["dayofweek"] = dt.dt.dayofweek
@@ -57,32 +59,40 @@ def make_time_features(df: pd.DataFrame, datetime_col: str) -> pd.DataFrame:
     return df
 
 
-def make_interaction_features(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+def make_interaction_features(df, target_col):
     """
     Interaction features that help tree models learn time-of-day × level effects.
     These are particularly effective for residual correction in the hybrid architecture.
     """
     if "hour_sin" in df.columns and f"{target_col}_roll_mean_24" in df.columns:
-        df[f"{target_col}_hour_sin_x_mean24"] = df["hour_sin"] * df[f"{target_col}_roll_mean_24"]
-        df[f"{target_col}_hour_cos_x_mean24"] = df["hour_cos"] * df[f"{target_col}_roll_mean_24"]
+        df[f"{target_col}_hour_sin_x_mean24"] = (
+            df["hour_sin"] * df[f"{target_col}_roll_mean_24"]
+        )
+        df[f"{target_col}_hour_cos_x_mean24"] = (
+            df["hour_cos"] * df[f"{target_col}_roll_mean_24"]
+        )
     if "is_weekend" in df.columns and f"{target_col}_lag_24" in df.columns:
-        df[f"{target_col}_weekend_x_lag24"] = df["is_weekend"] * df[f"{target_col}_lag_24"]
+        df[f"{target_col}_weekend_x_lag24"] = (
+            df["is_weekend"] * df[f"{target_col}_lag_24"]
+        )
     if "dow_sin" in df.columns and f"{target_col}_roll_mean_24" in df.columns:
-        df[f"{target_col}_dow_sin_x_mean24"] = df["dow_sin"] * df[f"{target_col}_roll_mean_24"]
+        df[f"{target_col}_dow_sin_x_mean24"] = (
+            df["dow_sin"] * df[f"{target_col}_roll_mean_24"]
+        )
     return df
 
 
 def featurize(
-    df: pd.DataFrame,
-    target_col: str,
-    datetime_col: str,
-    lag_periods: list[int],
-    rolling_windows: list[int],
-    use_time_features: bool,
-    ewm_spans: list[int] | None = None,
-    diff_pairs: list[tuple] | None = None,
-    use_interactions: bool = False,
-) -> pd.DataFrame:
+    df,
+    target_col,
+    datetime_col,
+    lag_periods,
+    rolling_windows,
+    use_time_features,
+    ewm_spans=None,
+    diff_pairs=None,
+    use_interactions=False,
+):
     df = df.copy()
     df = make_lag_features(df, target_col, lag_periods)
     df = make_rolling_features(df, target_col, rolling_windows)
@@ -102,7 +112,7 @@ def featurize(
     return df
 
 
-def main(config_path: str) -> None:
+def main(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
@@ -117,9 +127,15 @@ def main(config_path: str) -> None:
     use_interactions = feat_cfg.get("use_interactions", False)
 
     splits = {
-        "train": (cfg["data"]["processed_train_path"], "data/processed/train_features.csv"),
+        "train": (
+            cfg["data"]["processed_train_path"],
+            "data/processed/train_features.csv",
+        ),
         "val": (cfg["data"]["processed_val_path"], "data/processed/val_features.csv"),
-        "test": (cfg["data"]["processed_test_path"], "data/processed/test_features.csv"),
+        "test": (
+            cfg["data"]["processed_test_path"],
+            "data/processed/test_features.csv",
+        ),
     }
 
     os.makedirs("data/processed", exist_ok=True)
@@ -127,9 +143,15 @@ def main(config_path: str) -> None:
     for split_name, (in_path, out_path) in splits.items():
         df = pd.read_csv(in_path)
         df_feat = featurize(
-            df, target_col, datetime_col,
-            lag_periods, rolling_windows, use_time_features,
-            ewm_spans, diff_pairs, use_interactions,
+            df,
+            target_col,
+            datetime_col,
+            lag_periods,
+            rolling_windows,
+            use_time_features,
+            ewm_spans,
+            diff_pairs,
+            use_interactions,
         )
         df_feat.to_csv(out_path, index=False)
         print(

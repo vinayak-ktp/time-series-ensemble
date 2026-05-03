@@ -1,37 +1,35 @@
-from typing import Dict
-
 import numpy as np
 
 
-def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def mae(y_true, y_pred):
     return float(np.mean(np.abs(y_true - y_pred)))
 
 
-def mse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def mse(y_true, y_pred):
     return float(np.mean((y_true - y_pred) ** 2))
 
 
-def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def rmse(y_true, y_pred):
     return float(np.sqrt(mse(y_true, y_pred)))
 
 
-def mape(y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-8) -> float:
+def mape(y_true, y_pred, eps=1e-8):
     return float(np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + eps))) * 100)
 
 
-def smape(y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-8) -> float:
+def smape(y_true, y_pred, eps=1e-8):
     num = np.abs(y_true - y_pred)
     denom = (np.abs(y_true) + np.abs(y_pred)) / 2 + eps
     return float(np.mean(num / denom) * 100)
 
 
-def r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def r2(y_true, y_pred):
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
     return float(1 - ss_res / (ss_tot + 1e-8))
 
 
-def compute_all_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+def compute_all_metrics(y_true, y_pred):
     return {
         "mae": mae(y_true, y_pred),
         "mse": mse(y_true, y_pred),

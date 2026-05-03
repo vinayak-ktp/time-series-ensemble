@@ -1,18 +1,16 @@
-import numpy as np
-import pandas as pd
 from catboost import CatBoostRegressor
 
 
 class CatBoostForecaster:
     def __init__(
         self,
-        n_estimators: int = 800,
-        learning_rate: float = 0.03,
-        max_depth: int = 8,
-        subsample: float = 0.8,
-        reg_lambda: float = 1.0,
-        min_child_samples: int = 10,
-        random_state: int = 42,
+        n_estimators=800,
+        learning_rate=0.03,
+        max_depth=8,
+        subsample=0.8,
+        reg_lambda=1.0,
+        min_child_samples=10,
+        random_state=42,
     ):
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
@@ -26,12 +24,14 @@ class CatBoostForecaster:
 
     def fit(
         self,
-        train_feat: pd.DataFrame,
-        val_feat: pd.DataFrame,
-        target_col: str,
-        datetime_col: str,
-    ) -> "CatBoostForecaster":
-        feature_cols = [c for c in train_feat.columns if c not in [target_col, datetime_col]]
+        train_feat,
+        val_feat,
+        target_col,
+        datetime_col,
+    ):
+        feature_cols = [
+            c for c in train_feat.columns if c not in [target_col, datetime_col]
+        ]
         self._feature_cols = feature_cols
 
         X_train = train_feat[feature_cols].values
@@ -53,11 +53,11 @@ class CatBoostForecaster:
         self.model_.fit(X_train, y_train, eval_set=(X_val, y_val))
         return self
 
-    def predict(self, df: pd.DataFrame, target_col: str, datetime_col: str) -> np.ndarray:
+    def predict(self, df, target_col, datetime_col):
         X = df[self._feature_cols].values
         return self.model_.predict(X)
 
-    def get_params(self) -> dict:
+    def get_params(self):
         return {
             "n_estimators": self.n_estimators,
             "learning_rate": self.learning_rate,

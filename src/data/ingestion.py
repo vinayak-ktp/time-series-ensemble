@@ -5,10 +5,12 @@ import urllib.request
 import pandas as pd
 import yaml
 
-ETT_URL = "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/ETT-small/ETTh1.csv"
+ETT_URL = (
+    "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/main/ETT-small/ETTh1.csv"
+)
 
 
-def download_dataset(url: str, dest_path: str) -> None:
+def download_dataset(url, dest_path):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     if os.path.exists(dest_path):
         print(f"[ingest] Dataset already exists at {dest_path}. Skipping download.")
@@ -18,7 +20,7 @@ def download_dataset(url: str, dest_path: str) -> None:
     print("[ingest] Download complete.")
 
 
-def validate_dataset(path: str, target_col: str, datetime_col: str) -> pd.DataFrame:
+def validate_dataset(path, target_col, datetime_col):
     df = pd.read_csv(path, parse_dates=[datetime_col])
     assert target_col in df.columns, f"Target column '{target_col}' not found."
     assert datetime_col in df.columns, f"Datetime column '{datetime_col}' not found."
@@ -28,7 +30,7 @@ def validate_dataset(path: str, target_col: str, datetime_col: str) -> pd.DataFr
     return df
 
 
-def main(config_path: str) -> None:
+def main(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 

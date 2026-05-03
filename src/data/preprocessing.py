@@ -7,15 +7,13 @@ import yaml
 from sklearn.preprocessing import StandardScaler
 
 
-def load_raw(path: str, datetime_col: str) -> pd.DataFrame:
+def load_raw(path, datetime_col):
     df = pd.read_csv(path, parse_dates=[datetime_col])
     df = df.sort_values(datetime_col).reset_index(drop=True)
     return df
 
 
-def chronological_split(
-    df: pd.DataFrame, test_size: float, val_size: float
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def chronological_split(df, test_size, val_size):
     n = len(df)
     n_test = int(n * test_size)
     n_val = int(n * val_size)
@@ -25,11 +23,13 @@ def chronological_split(
     val = df.iloc[n_train : n_train + n_val].copy()
     test = df.iloc[n_train + n_val :].copy()
 
-    print(f"[preprocess] Split sizes — train: {len(train)}, val: {len(val)}, test: {len(test)}")
+    print(
+        f"[preprocess] Split sizes — train: {len(train)}, val: {len(val)}, test: {len(test)}"
+    )
     return train, val, test
 
 
-def main(config_path: str) -> None:
+def main(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 

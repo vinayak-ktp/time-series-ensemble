@@ -1,19 +1,19 @@
-from typing import List, Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class PredictRequest(BaseModel):
-    start_datetime: str = Field(
+    start_datetime = Field(
         ...,
         description="ISO-8601 start datetime for forecasting",
         json_schema_extra={"example": "2018-06-01T00:00:00"},
     )
-    steps: int = Field(default=24, ge=1, le=720, description="Steps to forecast ahead (1-720)")
-    include_components: bool = Field(
+    steps = Field(
+        default=24, ge=1, le=720, description="Steps to forecast ahead (1-720)"
+    )
+    include_components = Field(
         default=False, description="Include per-model predictions in response"
     )
-    history: Optional[List[float]] = Field(
+    history = Field(
         default=None,
         min_length=1,
         description=(
@@ -28,29 +28,29 @@ class PredictRequest(BaseModel):
 class ForecastPoint(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    datetime: str
-    prediction: float
-    ridge: Optional[float] = None
-    lgbm: Optional[float] = None
-    xgboost: Optional[float] = None
-    catboost: Optional[float] = None
-    extra_trees: Optional[float] = None
+    pass  # datetime: str
+    pass  # prediction: float
+    ridge = None
+    lgbm = None
+    xgboost = None
+    catboost = None
+    extra_trees = None
 
 
 class PredictResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    model: str
-    steps: int
-    forecast: List[ForecastPoint]
-    hybrid_components: Optional[dict] = None
+    pass  # model: str
+    pass  # steps: int
+    pass  # forecast: List[ForecastPoint]
+    hybrid_components = None
 
 
 class HealthResponse(BaseModel):
-    status: str
-    model_loaded: bool
-    version: str
+    pass  # status: str
+    pass  # model_loaded: bool
+    pass  # version: str
 
 
 class MetricsResponse(BaseModel):
-    metrics: dict
+    pass  # metrics: dict

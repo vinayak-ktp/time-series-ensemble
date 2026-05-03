@@ -1,8 +1,6 @@
 import logging
 import warnings
 
-import numpy as np
-import pandas as pd
 from prophet import Prophet
 
 logging.getLogger("prophet").setLevel(logging.WARNING)
@@ -13,14 +11,14 @@ warnings.filterwarnings("ignore")
 class ProphetForecaster:
     def __init__(
         self,
-        changepoint_prior_scale: float = 0.05,
-        seasonality_prior_scale: float = 10.0,
-        seasonality_mode: str = "multiplicative",
-        yearly_seasonality: bool = True,
-        weekly_seasonality: bool = True,
-        daily_seasonality: bool = True,
-        horizon: int = 24,
-        freq: str = "H",
+        changepoint_prior_scale=0.05,
+        seasonality_prior_scale=10.0,
+        seasonality_mode="multiplicative",
+        yearly_seasonality=True,
+        weekly_seasonality=True,
+        daily_seasonality=True,
+        horizon=24,
+        freq="H",
     ):
         self.changepoint_prior_scale = changepoint_prior_scale
         self.seasonality_prior_scale = seasonality_prior_scale
@@ -33,7 +31,7 @@ class ProphetForecaster:
         self.model_ = None
         self._last_ds = None
 
-    def fit(self, df: pd.DataFrame, datetime_col: str, target_col: str) -> "ProphetForecaster":
+    def fit(self, df, datetime_col, target_col):
         prophet_df = df[[datetime_col, target_col]].rename(
             columns={datetime_col: "ds", target_col: "y"}
         )
@@ -49,18 +47,18 @@ class ProphetForecaster:
         self._last_ds = prophet_df["ds"].max()
         return self
 
-    def predict(self, steps: int = None) -> np.ndarray:
+    def predict(self, steps=None):
         n = steps or self.horizon
         future = self.model_.make_future_dataframe(periods=n, freq=self.freq)
         forecast = self.model_.predict(future)
         return forecast["yhat"].values[-n:]
 
-    def predict_on_df(self, df: pd.DataFrame, datetime_col: str) -> np.ndarray:
+    def predict_on_df(self, df, datetime_col):
         future = df[[datetime_col]].rename(columns={datetime_col: "ds"})
         forecast = self.model_.predict(future)
         return forecast["yhat"].values
 
-    def get_params(self) -> dict:
+    def get_params(self):
         return {
             "changepoint_prior_scale": self.changepoint_prior_scale,
             "seasonality_prior_scale": self.seasonality_prior_scale,

@@ -1,7 +1,5 @@
 import warnings
 
-import numpy as np
-import pandas as pd
 from catboost import CatBoostRegressor
 from sklearn.base import BaseEstimator, RegressorMixin
 
@@ -11,13 +9,13 @@ warnings.filterwarnings("ignore")
 class CatBoostForecaster(BaseEstimator, RegressorMixin):
     def __init__(
         self,
-        n_estimators: int = 1000,
-        learning_rate: float = 0.05,
-        max_depth: int = 6,
-        subsample: float = 0.8,
-        reg_lambda: float = 3.0,
-        min_child_samples: int = 20,
-        random_seed: int = 42,
+        n_estimators=1000,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        reg_lambda=3.0,
+        min_child_samples=20,
+        random_seed=42,
     ):
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
@@ -29,10 +27,10 @@ class CatBoostForecaster(BaseEstimator, RegressorMixin):
         self.model_ = None
         self.feature_names_ = None
 
-    def _get_feature_matrix(
-        self, df: pd.DataFrame, target_col: str, datetime_col: str
-    ) -> tuple[np.ndarray, np.ndarray, list]:
-        drop_cols = [target_col, datetime_col] if datetime_col in df.columns else [target_col]
+    def _get_feature_matrix(self, df, target_col, datetime_col):
+        drop_cols = (
+            [target_col, datetime_col] if datetime_col in df.columns else [target_col]
+        )
         X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
         y = df[target_col].values
         feature_names = [c for c in df.columns if c not in drop_cols]
@@ -40,12 +38,14 @@ class CatBoostForecaster(BaseEstimator, RegressorMixin):
 
     def fit(
         self,
-        train_df: pd.DataFrame,
-        val_df: pd.DataFrame,
-        target_col: str,
-        datetime_col: str,
-    ) -> "CatBoostForecaster":
-        X_train, y_train, feat_names = self._get_feature_matrix(train_df, target_col, datetime_col)
+        train_df,
+        val_df,
+        target_col,
+        datetime_col,
+    ):
+        X_train, y_train, feat_names = self._get_feature_matrix(
+            train_df, target_col, datetime_col
+        )
         X_val, y_val, _ = self._get_feature_matrix(val_df, target_col, datetime_col)
         self.feature_names_ = feat_names
 
@@ -71,12 +71,14 @@ class CatBoostForecaster(BaseEstimator, RegressorMixin):
         )
         return self
 
-    def predict(self, df: pd.DataFrame, target_col: str, datetime_col: str) -> np.ndarray:
-        drop_cols = [target_col, datetime_col] if datetime_col in df.columns else [target_col]
+    def predict(self, df, target_col, datetime_col):
+        drop_cols = (
+            [target_col, datetime_col] if datetime_col in df.columns else [target_col]
+        )
         X = df.drop(columns=[c for c in drop_cols if c in df.columns]).values
         return self.model_.predict(X)
 
-    def get_params(self, deep=True) -> dict:
+    def get_params(self, deep=True):
         return {
             "n_estimators": self.n_estimators,
             "learning_rate": self.learning_rate,

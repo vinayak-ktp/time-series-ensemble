@@ -53,7 +53,9 @@ class TestPredictEndpoint:
             pred_module.predictor._loaded = original
 
     def test_predict_invalid_steps(self, client):
-        resp = client.post("/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 0})
+        resp = client.post(
+            "/predict", json={"start_datetime": "2018-06-01T00:00:00", "steps": 0}
+        )
         assert resp.status_code == 422
 
     def test_predict_too_many_steps(self, client):

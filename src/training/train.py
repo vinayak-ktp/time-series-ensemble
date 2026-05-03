@@ -8,7 +8,6 @@ import warnings
 import mlflow
 import mlflow.pyfunc
 import mlflow.sklearn
-import numpy as np
 import pandas as pd
 import yaml
 from mlflow.tracking import MlflowClient
@@ -25,7 +24,7 @@ from src.models.linear import RidgeForecaster
 from src.models.xgboost import XGBForecaster
 
 
-def load_data(cfg: dict) -> tuple:
+def load_data(cfg):
     target_col = cfg["base"]["target_col"]
     datetime_col = cfg["base"]["datetime_col"]
     train_feat = pd.read_csv("data/processed/train_features.csv")
@@ -34,64 +33,77 @@ def load_data(cfg: dict) -> tuple:
     return train_feat, val_feat, test_feat, target_col, datetime_col
 
 
-def train_ridge(cfg, train_feat, val_feat, target_col, datetime_col) -> RidgeForecaster:
+def train_ridge(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training Ridge (Base Trend Model)...")
     model = RidgeForecaster(alpha=cfg["ridge"]["alpha"])
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
-def train_lgbm(cfg, train_feat, val_feat, target_col, datetime_col) -> LGBMForecaster:
+def train_lgbm(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training LightGBM...")
     l = cfg["lightgbm"]
     model = LGBMForecaster(
-        n_estimators=l["n_estimators"], learning_rate=l["learning_rate"],
-        max_depth=l["max_depth"], num_leaves=l["num_leaves"],
-        min_child_samples=l["min_child_samples"], subsample=l["subsample"],
-        colsample_bytree=l["colsample_bytree"], reg_alpha=l["reg_alpha"],
+        n_estimators=l["n_estimators"],
+        learning_rate=l["learning_rate"],
+        max_depth=l["max_depth"],
+        num_leaves=l["num_leaves"],
+        min_child_samples=l["min_child_samples"],
+        subsample=l["subsample"],
+        colsample_bytree=l["colsample_bytree"],
+        reg_alpha=l["reg_alpha"],
         reg_lambda=l["reg_lambda"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
-def train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col) -> XGBForecaster:
+def train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training XGBoost...")
     x = cfg["xgboost"]
     model = XGBForecaster(
-        n_estimators=x["n_estimators"], learning_rate=x["learning_rate"],
-        max_depth=x["max_depth"], subsample=x["subsample"],
-        colsample_bytree=x["colsample_bytree"], reg_alpha=x["reg_alpha"],
-        reg_lambda=x["reg_lambda"], min_child_weight=x["min_child_weight"],
+        n_estimators=x["n_estimators"],
+        learning_rate=x["learning_rate"],
+        max_depth=x["max_depth"],
+        subsample=x["subsample"],
+        colsample_bytree=x["colsample_bytree"],
+        reg_alpha=x["reg_alpha"],
+        reg_lambda=x["reg_lambda"],
+        min_child_weight=x["min_child_weight"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
-def train_catboost(cfg, train_feat, val_feat, target_col, datetime_col) -> CatBoostForecaster:
+def train_catboost(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training CatBoost (Residual Model)...")
     c = cfg["catboost"]
     model = CatBoostForecaster(
-        n_estimators=c["n_estimators"], learning_rate=c["learning_rate"],
-        max_depth=c["max_depth"], subsample=c["subsample"],
-        reg_lambda=c["reg_lambda"], min_child_samples=c["min_child_samples"],
+        n_estimators=c["n_estimators"],
+        learning_rate=c["learning_rate"],
+        max_depth=c["max_depth"],
+        subsample=c["subsample"],
+        reg_lambda=c["reg_lambda"],
+        min_child_samples=c["min_child_samples"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
-def train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col) -> ExtraTreesForecaster:
+def train_extra_trees(cfg, train_feat, val_feat, target_col, datetime_col):
     print("[train] Training Extra Trees (Residual Model)...")
     et = cfg["extra_trees"]
     model = ExtraTreesForecaster(
-        n_estimators=et["n_estimators"], max_depth=et["max_depth"],
-        min_samples_leaf=et["min_samples_leaf"], max_features=et["max_features"],
+        n_estimators=et["n_estimators"],
+        max_depth=et["max_depth"],
+        min_samples_leaf=et["min_samples_leaf"],
+        max_features=et["max_features"],
     )
     model.fit(train_feat, val_feat, target_col, datetime_col)
     return model
 
 
-def log_model_metrics(model_name: str, metrics: dict, params: dict = None) -> None:
+def log_model_metrics(model_name, metrics, params=None):
     for k, v in metrics.items():
         mlflow.log_metric(f"{model_name}_{k}", v)
     if params:
@@ -99,7 +111,7 @@ def log_model_metrics(model_name: str, metrics: dict, params: dict = None) -> No
             mlflow.log_param(f"{model_name}_{k}", v)
 
 
-def main(config_path: str) -> None:
+def main(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
@@ -110,22 +122,24 @@ def main(config_path: str) -> None:
     mlflow.set_experiment(cfg["mlflow"]["experiment_name"])
 
     train_feat, val_feat, test_feat, target_col, datetime_col = load_data(cfg)
-    y_val = val_feat[target_col].values
+    val_feat[target_col].values
     y_test = test_feat[target_col].values
 
     base_model_name = cfg["hybrid"]["base_model"]
     residual_model_names = cfg["hybrid"]["residual_models"]
 
     with mlflow.start_run(run_name="hybrid_training") as run:
-        mlflow.log_params({
-            "horizon": cfg["data"]["horizon"],
-            "test_size": cfg["base"]["test_size"],
-            "val_size": cfg["base"]["val_size"],
-            "hybrid_base": base_model_name,
-            "hybrid_residuals": ",".join(residual_model_names),
-            "lag_periods": str(cfg["features"]["lag_periods"]),
-            "ewm_spans": str(cfg["features"].get("ewm_spans", [])),
-        })
+        mlflow.log_params(
+            {
+                "horizon": cfg["data"]["horizon"],
+                "test_size": cfg["base"]["test_size"],
+                "val_size": cfg["base"]["val_size"],
+                "hybrid_base": base_model_name,
+                "hybrid_residuals": ",".join(residual_model_names),
+                "lag_periods": str(cfg["features"]["lag_periods"]),
+                "ewm_spans": str(cfg["features"].get("ewm_spans", [])),
+            }
+        )
 
         # ── 1. Train Base Model (Ridge on original target) ──────────────────
         with mlflow.start_run(run_name="ridge", nested=True):
@@ -147,11 +161,15 @@ def main(config_path: str) -> None:
         # ── 3. Train Residual Models on ridge errors ─────────────────────────
         print(f"[train] Training residual models on errors: {residual_model_names}")
         with mlflow.start_run(run_name="catboost", nested=True):
-            catboost_model = train_catboost(cfg, train_res_feat, val_res_feat, target_col, datetime_col)
+            catboost_model = train_catboost(
+                cfg, train_res_feat, val_res_feat, target_col, datetime_col
+            )
             mlflow.log_params(catboost_model.get_params())
 
         with mlflow.start_run(run_name="extra_trees", nested=True):
-            et_model = train_extra_trees(cfg, train_res_feat, val_res_feat, target_col, datetime_col)
+            et_model = train_extra_trees(
+                cfg, train_res_feat, val_res_feat, target_col, datetime_col
+            )
             mlflow.log_params(et_model.get_params())
 
         # Observability models (trained on original target)
@@ -161,7 +179,9 @@ def main(config_path: str) -> None:
             all_models["lgbm"] = lgbm
 
         with mlflow.start_run(run_name="xgboost", nested=True):
-            xgb_model = train_xgboost(cfg, train_feat, val_feat, target_col, datetime_col)
+            xgb_model = train_xgboost(
+                cfg, train_feat, val_feat, target_col, datetime_col
+            )
             mlflow.log_params(xgb_model.get_params())
             all_models["xgboost"] = xgb_model
 
@@ -169,8 +189,11 @@ def main(config_path: str) -> None:
         print("\n[train] Evaluating models...")
         all_metrics = {}
         all_models = {
-            "ridge": ridge, "lgbm": lgbm, "xgboost": xgb_model,
-            "catboost": catboost_model, "extra_trees": et_model,
+            "ridge": ridge,
+            "lgbm": lgbm,
+            "xgboost": xgb_model,
+            "catboost": catboost_model,
+            "extra_trees": et_model,
         }
 
         for name in ["ridge", "lgbm", "xgboost"]:
@@ -178,8 +201,10 @@ def main(config_path: str) -> None:
             m = compute_all_metrics(y_test, preds)
             all_metrics[name] = m
             log_model_metrics(name, m)
-            print(f"[eval] {name:12s} | RMSE={m['rmse']:.4f} | MAE={m['mae']:.4f} "
-                  f"| MAPE={m['mape']:.2f}% | SMAPE={m['smape']:.2f}% | R²={m['r2']:.4f}")
+            print(
+                f"[eval] {name:12s} | RMSE={m['rmse']:.4f} | MAE={m['mae']:.4f} "
+                f"| MAPE={m['mape']:.2f}% | SMAPE={m['smape']:.2f}% | R²={m['r2']:.4f}"
+            )
 
         # ── 5. Hybrid prediction: Ridge base + avg(residual models) ─────────
         test_cat_res = catboost_model.predict(test_feat, target_col, datetime_col)
@@ -190,9 +215,11 @@ def main(config_path: str) -> None:
         hybrid_metrics = compute_all_metrics(y_test, hybrid_preds)
         all_metrics["hybrid"] = hybrid_metrics
         log_model_metrics("hybrid", hybrid_metrics)
-        print(f"[eval] {'hybrid':12s} | RMSE={hybrid_metrics['rmse']:.4f} | MAE={hybrid_metrics['mae']:.4f} "
-              f"| MAPE={hybrid_metrics['mape']:.2f}% | SMAPE={hybrid_metrics['smape']:.2f}% "
-              f"| R²={hybrid_metrics['r2']:.4f}")
+        print(
+            f"[eval] {'hybrid':12s} | RMSE={hybrid_metrics['rmse']:.4f} | MAE={hybrid_metrics['mae']:.4f} "
+            f"| MAPE={hybrid_metrics['mape']:.2f}% | SMAPE={hybrid_metrics['smape']:.2f}% "
+            f"| R²={hybrid_metrics['r2']:.4f}"
+        )
 
         # ── 6. Persist models ────────────────────────────────────────────────
         for name, obj in all_models.items():
@@ -210,15 +237,20 @@ def main(config_path: str) -> None:
         with open("metrics/metrics.json", "w") as f:
             json.dump(flat_metrics, f, indent=2)
 
-        pred_df = pd.DataFrame({
-            "ds": (test_feat[datetime_col].values if datetime_col in test_feat.columns
-                   else range(len(y_test))),
-            "y_true": y_test,
-            "y_hybrid": hybrid_preds,
-            "y_ridge": test_ridge_preds,
-            "y_catboost_res": test_cat_res,
-            "y_extra_trees_res": test_et_res,
-        })
+        pred_df = pd.DataFrame(
+            {
+                "ds": (
+                    test_feat[datetime_col].values
+                    if datetime_col in test_feat.columns
+                    else range(len(y_test))
+                ),
+                "y_true": y_test,
+                "y_hybrid": hybrid_preds,
+                "y_ridge": test_ridge_preds,
+                "y_catboost_res": test_cat_res,
+                "y_extra_trees_res": test_et_res,
+            }
+        )
         pred_df.to_csv("metrics/predictions.csv", index=False)
         mlflow.log_artifact("metrics/predictions.csv")
 
@@ -229,7 +261,9 @@ def main(config_path: str) -> None:
             client.create_registered_model(model_name)
         except Exception:
             pass
-        client.create_model_version(name=model_name, source=f"runs:/{run_id}/models", run_id=run_id)
+        client.create_model_version(
+            name=model_name, source=f"runs:/{run_id}/models", run_id=run_id
+        )
         print(f"\n[train] ✓ Run ID: {run_id}")
         print(f"[train] ✓ Hybrid Base: {base_model_name}")
         print(f"[train] ✓ Hybrid Residuals: {residual_model_names}")

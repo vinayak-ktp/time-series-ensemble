@@ -10,7 +10,6 @@ from api.schemas import (
     ForecastPoint,
     HealthResponse,
     MetricsResponse,
-    PredictRequest,
     PredictResponse,
 )
 
@@ -19,7 +18,7 @@ MODEL_NAME = "mlops-timeseries-ensemble"
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
     predictor.load()
     yield
 
@@ -48,7 +47,11 @@ app.add_middleware(
 
 @app.get("/", tags=["root"])
 async def root():
-    return {"message": "MLOps Time Series Ensemble API", "version": APP_VERSION, "docs": "/docs"}
+    return {
+        "message": "MLOps Time Series Ensemble API",
+        "version": APP_VERSION,
+        "docs": "/docs",
+    }
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
@@ -60,8 +63,13 @@ async def health():
     )
 
 
-@app.post("/predict", response_model=PredictResponse, response_model_exclude_none=True, tags=["forecast"])
-async def predict(request: PredictRequest):
+@app.post(
+    "/predict",
+    response_model=PredictResponse,
+    response_model_exclude_none=True,
+    tags=["forecast"],
+)
+async def predict(request):
     if not predictor.is_loaded:
         raise HTTPException(
             status_code=503,

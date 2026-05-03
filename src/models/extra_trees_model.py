@@ -1,7 +1,5 @@
 import warnings
 
-import numpy as np
-import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import StandardScaler
@@ -12,12 +10,12 @@ warnings.filterwarnings("ignore")
 class ExtraTreesForecaster(BaseEstimator, RegressorMixin):
     def __init__(
         self,
-        n_estimators: int = 500,
-        max_depth: int = None,
-        min_samples_leaf: int = 4,
-        max_features: float = 0.5,
-        random_state: int = 42,
-        n_jobs: int = -1,
+        n_estimators=500,
+        max_depth=None,
+        min_samples_leaf=4,
+        max_features=0.5,
+        random_state=42,
+        n_jobs=-1,
     ):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
@@ -29,16 +27,16 @@ class ExtraTreesForecaster(BaseEstimator, RegressorMixin):
         self.scaler_ = StandardScaler()
         self._feature_cols = None
 
-    def _get_feature_cols(self, df: pd.DataFrame, target_col: str, datetime_col: str) -> list:
+    def _get_feature_cols(self, df, target_col, datetime_col):
         return [c for c in df.columns if c not in (target_col, datetime_col)]
 
     def fit(
         self,
-        train_df: pd.DataFrame,
-        val_df: pd.DataFrame,
-        target_col: str,
-        datetime_col: str,
-    ) -> "ExtraTreesForecaster":
+        train_df,
+        val_df,
+        target_col,
+        datetime_col,
+    ):
         self._feature_cols = self._get_feature_cols(train_df, target_col, datetime_col)
         X_train = train_df[self._feature_cols].values
         y_train = train_df[target_col].values
@@ -56,12 +54,12 @@ class ExtraTreesForecaster(BaseEstimator, RegressorMixin):
         self.model_.fit(X_scaled, y_train)
         return self
 
-    def predict(self, df: pd.DataFrame, target_col: str, datetime_col: str) -> np.ndarray:
+    def predict(self, df, target_col, datetime_col):
         X = df[self._feature_cols].values
         X_scaled = self.scaler_.transform(X)
         return self.model_.predict(X_scaled)
 
-    def get_params(self, deep=True) -> dict:
+    def get_params(self, deep=True):
         return {
             "n_estimators": self.n_estimators,
             "max_depth": self.max_depth,
