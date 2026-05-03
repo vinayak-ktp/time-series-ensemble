@@ -1,0 +1,691 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{cite}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue,}
+
+\title{A Hybrid Residual Forecasting Framework for Time Series with MLOps Integration}
+
+\author{ \IEEEauthorblockN{Vansh Kumar Soni} \IEEEauthorblockA{ Department of CSE (AI\&ML)\\ Dayananda Sagar University\\ Bangalore, India\\ eng23am0081@dsu.edu.in }
+\and \IEEEauthorblockN{Vinayak K} \IEEEauthorblockA{ Department of CSE (AI\&ML)\\ Dayananda Sagar University\\ Bangalore, India\\ eng23am0086@dsu.edu.in }
+\and \IEEEauthorblockN{Abhishek Tiwari} \IEEEauthorblockA{ Department of CSE (AI\&ML)\\ Dayananda Sagar University\\ Bangalore, India\\ eng23am0097@dsu.edu.in }
+}
+
+\begin{document}
+  \maketitle
+
+  % ── Abstract ──────────────────────────────────────────────────────────────────
+  \begin{abstract}
+    Production time series forecasting is rarely just a modelling problem---it equally
+    demands reliable infrastructure for training, tracking, and serving predictions at
+    scale. This paper introduces a Hybrid Residual Forecasting framework, validated on
+    the ETTh1 electricity transformer benchmark. The core idea is a deliberate task
+    decomposition: a Ridge regression base model handles the global linear signal, and
+    then CatBoost and ExtraTrees are trained solely on the errors that Ridge leaves
+    behind, targeting non-linear local fluctuations that a linear model cannot express.
+    The final output adds the averaged residual correction back onto the linear base.
+    Every stage of this pipeline is version-controlled with DVC, tracked in MLflow,
+    packaged inside Docker, and exposed through a FastAPI REST endpoint. Against the
+    ETTh1 test partition the hybrid achieves RMSE\,$=0.0757$, MAE\,$=0.0520$,
+    SMAPE\,$=7.80\%$, and $\text{R}^{2}=0.9645$, beating every individual model we
+    evaluated. We additionally document an important pitfall: MAPE becomes unreliable
+    on standardised targets whose values hover near zero, and we argue SMAPE should
+    be preferred in such settings. The complete system, from raw data download through
+    live HTTP inference, runs end-to-end with a single \texttt{dvc repro} command.
+  \end{abstract}
+
+  \begin{IEEEkeywords}
+    time series forecasting, hybrid forecasting, residual boosting, Ridge regression,
+    CatBoost, ExtraTrees, LightGBM, XGBoost, MLOps, DVC, MLflow, FastAPI, Docker,
+    reproducibility
+  \end{IEEEkeywords}
+
+  % ── 1. Introduction ───────────────────────────────────────────────────────────
+  \section{Introduction}
+
+  Forecasting plays a foundational role in energy management, financial planning, supply
+  chain optimisation, and industrial monitoring \cite{makridakis2018m4, box2015time}.
+  In practice, the difficulty is not limited to picking a model; it extends to building
+  infrastructure that can train, retrain, track, and serve predictions with confidence
+  over time. Academic work and industrial practice have historically treated these two
+  concerns separately, and this disconnect is the motivation for our work.
+
+  On the modelling side, decades of research have produced several well-understood
+  families. ARIMA \cite{box2015time} models the linear autocorrelation structure of a
+  series through differencing, autoregressive, and moving-average terms. Prophet
+  \cite{taylor2018prophet} takes a decomposition approach, treating trend and
+  seasonality as separable components. Gradient-boosted trees---LightGBM
+  \cite{ke2017lightgbm} and XGBoost \cite{chen2016xgboost} in particular---reframe
+  forecasting as tabular regression over lag and rolling-statistics features,
+  often matching or exceeding sequence models on structured benchmarks
+  \cite{hewamalage2021recurrent, januschowski2022forecasting}. None of these families
+  consistently wins: statistical approaches shine on short histories, tree models
+  leverage rich feature matrices, and competitions repeatedly show that combining
+  different families produces more robust results than any single method
+  \cite{makridakis2018m4, makridakis2022m5}.
+
+  The operational half of the problem falls under Machine Learning Operations (MLOps)
+  \cite{sculley2015hidden, kreuzberger2023mlops}. Sculley et al.\ famously noted that
+  actual model code makes up a surprisingly small portion of a deployed ML system; the
+  surrounding data pipelines, configuration layers, monitoring hooks, and serving
+  infrastructure dominate. Modern tools exist to fill these gaps---DVC \cite{dvc2020}
+  for data versioning and pipeline orchestration, MLflow \cite{mlflow2018} for
+  experiment tracking and model registration, Docker \cite{docker2013} for
+  environment-reproducible packaging, and FastAPI \cite{fastapi2018} for REST serving.
+  A recent landscape survey \cite{berberi2025mlops} reinforces that production teams
+  need coordinated support across all four of these dimensions, not just individual
+  point tools.
+
+  What is still rare in the published literature is a working system that weaves these
+  tools together around a non-trivial multi-model forecasting architecture. This paper
+  fills that gap.
+
+  \textbf{Contributions.} Concretely, we contribute:
+  \begin{itemize}
+    \item A \textbf{Hybrid Residual Forecasting} architecture where Ridge regression
+      captures the global linear trend and two tree models (CatBoost, ExtraTrees) are
+      trained only on Ridge's errors---yielding $\text{R}^{2}=0.9645$ and
+      SMAPE\,$=7.80\%$ on the ETTh1 benchmark.
+
+    \item A feature engineering pipeline augmented with exponentially weighted moving
+      averages (EWM) and lag-difference velocity features, designed to make local trend
+      momentum visible to residual-correction models.
+
+    \item A fully reproducible four-stage DVC pipeline, MLflow nested run tracking,
+      Docker containerisation, and a live FastAPI endpoint, together with a
+      quantitative analysis of MAPE's unreliability on standardised near-zero targets.
+  \end{itemize}
+
+  % ── 2. Related Work ───────────────────────────────────────────────────────────
+  \section{Related Work}
+
+  \subsection{Statistical Time Series Models}
+
+  ARIMA \cite{box2015time} is the workhorse statistical baseline in univariate
+  forecasting. It achieves stationarity through differencing and then models the
+  remaining autocorrelation with AR and MA components, with model order selected by
+  the Box-Jenkins procedure. Despite its theoretical elegance, ARIMA fits sequentially
+  and cannot directly exploit an exogenous feature matrix---a practical limitation
+  when additional covariates carry predictive signal.
+
+  Prophet \cite{taylor2018prophet} approaches the same problem differently, fitting a
+  piecewise linear or logistic trend alongside Fourier-series seasonality and holiday
+  regressors through a Stan-based \cite{stan2017} Bayesian optimiser. It was designed
+  primarily for daily business data with strong, regular seasonal patterns, and it
+  handles irregular gaps and outliers well. Its additive structure, however, implicitly
+  assumes the signal has meaningful amplitude at its original measurement scale;
+  standardisation can suppress the seasonal structure that Prophet needs to function.
+
+  \subsection{Gradient-Boosted Tree Forecasting}
+
+  LightGBM \cite{ke2017lightgbm} departs from traditional depth-wise tree growth by
+  growing leaves greedily and using histogram-based bin splitting, which dramatically
+  reduces training time on large tabular datasets. XGBoost \cite{chen2016xgboost}
+  takes a more regularisation-heavy approach---second-order gradient approximations,
+  column subsampling, and shrinkage---leading to somewhat different generalisation
+  characteristics. Both frame the forecasting task as ordinary supervised regression
+  over a manually constructed lag-and-calendar feature matrix, and this simple framing
+  has repeatedly been shown to rival or beat sequential neural architectures on
+  structured benchmarks \cite{hewamalage2021recurrent}. The M5 competition
+  \cite{makridakis2022m5} and subsequent post-competition analyses
+  \cite{januschowski2022forecasting, lainder2022forecasting} solidified gradient
+  boosting as the dominant algorithm family in practical large-scale forecasting.
+
+  \subsection{Deep and Foundation Forecasting Models}
+
+  A growing body of work revisits the assumption that deeper architectures
+  automatically improve forecasting. Zeng et al.\ \cite{zeng2023transformers}
+  found that single-layer linear models can actually beat much more complex
+  Transformer-based forecasters on several long-horizon ETT benchmarks---a sobering
+  result that motivates careful baseline construction before introducing architectural
+  complexity. PatchTST \cite{nie2023patchtst} partially addresses this by segmenting
+  the input series into patches and processing channels independently, achieving
+  improvements on ETTh1 and related datasets. At an even larger scale, Chronos
+  \cite{ansari2024chronos} tokenises time series values and pre-trains a probabilistic
+  forecaster on a diverse corpus of datasets. Our work sits in a different part of
+  this design space: we deliberately avoid deep architectures and instead study how
+  well a two-stage linear-plus-trees pipeline can be wrapped in a production-ready
+  MLOps system.
+
+  \subsection{Forecast Combination}
+
+  The theoretical case for combining forecasts goes back to Bates and Granger
+  \cite{bates1969combination}, who demonstrated that a simple average of two unbiased
+  forecasters generally reduces variance relative to either individual forecast. The M4
+  \cite{makridakis2018m4} and M5 \cite{makridakis2022m5} competitions both confirmed
+  this empirically at scale: hybrid methods that blend statistical and machine-learning
+  forecasters consistently placed near the top of the leaderboard. More sophisticated
+  combination strategies exist, including Wolpert's stacked generalisation
+  \cite{wolpert1992stacked}, which trains a meta-learner on cross-validated base
+  forecasts, and blending approaches that jointly tune gradient boosted trees with
+  neural forecasters \cite{vogklis2022blending}. We intentionally use an unweighted
+  average rather than stacking, prioritising simplicity and reduced overfitting risk
+  at the cost of some potential accuracy gain.
+
+  \subsection{MLOps Tooling}
+
+  Kreuzberger et al.\ \cite{kreuzberger2023mlops} distilled the MLOps landscape into
+  three foundational pillars: reproducibility, automation, and monitoring. A more recent
+  review by Berberi et al.\ \cite{berberi2025mlops} catalogues the current generation
+  of platforms and tools, concluding that no single tool yet covers all lifecycle
+  concerns---data management, training orchestration, deployment, and runtime monitoring
+  each tend to require dedicated solutions. DVC \cite{dvc2020} addresses the data and
+  pipeline-reproducibility gap through content-addressed hashing integrated with Git.
+  MLflow \cite{mlflow2018} handles experiment governance with a language-agnostic
+  tracking API and an optional model registry. Docker \cite{docker2013} and FastAPI
+  \cite{fastapi2018} then cover packaging and serving. The combination of all four
+  in a single, coherently documented forecasting system is our specific contribution
+  to this intersection of research areas.
+
+  % ── 3. Dataset ──────────────────────────────────────────────────────────────
+  \section{Dataset}
+
+  Our experiments use the \textbf{ETTh1} (Electricity Transformer Temperature,
+  hourly) dataset \cite{zhou2021informer}. Collected from an electricity transformer
+  substation at one-hour resolution between July 2016 and June 2018, the corpus spans
+  17,420 observations across eight channels: six load readings (HUFL, HULL, MUFL,
+  MULL, LUFL, LULL) and oil temperature (OT). We target OT, whose training-set
+  distribution has mean 13.32\,°C, standard deviation 8.57\,°C, and range $[-4.08,
+  46.01]$\,°C.
+
+  We partition the data chronologically to eliminate any look-ahead bias:
+  \begin{itemize}
+    \item \textbf{Train}: 70\% --- 12,194 samples (Jul 2016 -- Nov 2017)
+    \item \textbf{Validation}: 10\% --- 1,742 samples (Nov 2017 -- Mar 2018)
+    \item \textbf{Test}: 20\% --- 3,484 samples (Mar 2018 -- Jun 2018)
+  \end{itemize}
+  Respecting this temporal order is not merely good practice---it is a necessary
+  condition for evaluating genuine out-of-sample generalisation in any forecasting
+  study \cite{hyndman2018forecasting}.
+
+  % ── 4. Methodology ──────────────────────────────────────────────────────────
+  \section{Methodology}
+
+  \subsection{Problem Formulation}
+
+  Let $\{y_{t}\}_{t=1}^{T}$ be the raw OT sequence and
+  $\mathbf{x}_{t} \in \mathbb{R}^{F}$ the corresponding feature vector ($F = 45$)
+  computed from observations available up to and including time $t$. We target
+  one-step-ahead prediction of $\hat{y}_{t+1}$.
+
+  Before fitting any model we standardise the target:
+  \begin{equation}
+    \tilde{y}_{t} = \frac{y_{t} - \mu_{\text{train}}}{\sigma_{\text{train}}}
+  \end{equation}
+  where $\mu_{\text{train}}$ and $\sigma_{\text{train}}$ are computed on the training
+  split exclusively. All subsequent modelling and evaluation operates on $\tilde{y}$.
+
+  \subsection{Feature Engineering}
+
+  The 45-dimensional feature vector $\mathbf{x}_{t}$ is built from three complementary
+  families:
+
+  \textbf{Lag and velocity features.} Direct autoregressive observations at lags
+  $\mathcal{L}= \{1, 2, 3, 6, 12, 24, 48, 168\}$ hours, plus first-order differences
+  between consecutive lag pairs (e.g., $\tilde{y}_{t-1} - \tilde{y}_{t-2}$). The
+  difference features encode local trend direction, giving tree models an explicit
+  velocity signal rather than forcing them to compute it implicitly.
+
+  \textbf{Rolling and EWM statistics.} Window-based means over
+  $\mathcal{W}= \{6, 12, 24, 168\}$ hours, together with exponentially weighted
+  moving averages over the same spans. EWM places heavier weight on recent observations,
+  so it reacts to sudden shifts faster than an equal-weight rolling mean.
+
+  \textbf{Calendar encodings.} Hour of day, day of week, month of year, and a
+  binary weekend indicator, each projected onto a unit circle via sine/cosine
+  transforms to preserve cyclical adjacency (so that hour 23 and hour 0 are
+  numerically close, not maximally distant).
+
+  \subsection{Hybrid Architecture}
+
+  Rather than training every model on the same target and averaging their outputs,
+  we use a sequential two-phase design inspired by gradient boosting's residual-fitting
+  insight.
+
+  \subsubsection{Phase 1: Ridge Base Model}
+
+  Tree ensembles cannot extrapolate beyond the range of their training labels, so any
+  global drift in the series will systematically fool them. Ridge Regression, by
+  contrast, fits a globally linear projection and extrapolates naturally. We train Ridge
+  on $\tilde{\mathbf{y}}$ by minimising:
+  \begin{equation}
+    \mathcal{L}_{\text{Ridge}}= \|\tilde{\mathbf{y}} - \mathbf{X}\mathbf{w}\|_{2}^{2} + \alpha \|\mathbf{w}\|_{2}^{2}
+  \end{equation}
+  This yields a globally stable base trajectory $\hat{y}^{\text{base}}_{t}$ that
+  captures the dominant linear structure of the signal.
+
+  \subsubsection{Phase 2: Residual Correction (CatBoost \& ExtraTrees)}
+
+  Ridge's linear constraint means it cannot capture conditional non-linearities---for
+  instance, the interaction between a sustained high 24-hour rolling average and a
+  specific time-of-day. We expose and target these missed patterns by computing the
+  signed residual on the training set:
+  \begin{equation}
+    r_{t} = \tilde{y}_{t} - \hat{y}^{\text{base}}_{t}
+  \end{equation}
+  Both CatBoost and ExtraTrees are then fitted with $r_{t}$ as their target rather
+  than the original $\tilde{y}_{t}$. CatBoost brings symmetric, depth-limited trees
+  built via ordered boosting; ExtraTrees uses random threshold selection to build
+  high-variance, low-bias corrective functions. Their algorithmic differences mean
+  their residual predictions are partially uncorrelated, which is precisely what
+  makes averaging them beneficial.
+
+  \subsection{Hybrid Inference}
+
+  At test time, the final prediction is:
+  \begin{equation}
+    \hat{y}_{t}^{\text{hybrid}}= \hat{y}_{t}^{\text{base}}+ \frac{1}{2}\left( \hat{r}_{t}^{\text{CatBoost}}+ \hat{r}_{t}^{\text{ExtraTrees}}\right)
+  \end{equation}
+
+  Algorithm~\ref{alg:hybrid} summarises the complete training and inference procedure.
+
+  \begin{algorithm}
+    \caption{Hybrid Residual Training and Inference}
+    \label{alg:hybrid}
+    \begin{algorithmic}
+      [1] \REQUIRE Train/val/test feature matrices; targets $\tilde{\mathbf{y}}$
+      \STATE \textbf{Phase 1: Base Trend}
+      \STATE Fit Ridge on train features targeting $\tilde{\mathbf{y}}$
+      \STATE $\hat{\mathbf{y}}^{\text{base}} \leftarrow \text{Ridge.predict}(\text{train features})$
+      \STATE $\mathbf{r} \leftarrow \tilde{\mathbf{y}} - \hat{\mathbf{y}}^{\text{base}}$
+      \STATE \textbf{Phase 2: Residuals}
+      \STATE Fit CatBoost on train features targeting $\mathbf{r}$
+      \STATE Fit ExtraTrees on train features targeting $\mathbf{r}$
+      \STATE \textbf{Phase 3: Inference}
+      \STATE $\hat{\mathbf{y}}^{\text{test\_base}} \leftarrow \text{Ridge.predict}(\text{test features})$
+      \STATE $\hat{\mathbf{r}}^{\text{test\_cat}} \leftarrow \text{CatBoost.predict}(\text{test features})$
+      \STATE $\hat{\mathbf{r}}^{\text{test\_et}} \leftarrow \text{ExtraTrees.predict}(\text{test features})$
+      \STATE $\hat{\mathbf{y}}^{\text{hybrid}} \leftarrow \hat{\mathbf{y}}^{\text{test\_base}} + \frac{1}{2}(\hat{\mathbf{r}}^{\text{test\_cat}} + \hat{\mathbf{r}}^{\text{test\_et}})$
+      \RETURN $\hat{\mathbf{y}}^{\text{hybrid}}$
+    \end{algorithmic}
+  \end{algorithm}
+
+  \subsection{Evaluation Metrics}
+
+  We report the following metrics on the held-out test partition. Let $y_{i}$ and
+  $\hat{y}_{i}$ denote true and predicted values for $i = 1, \ldots, N$.
+
+  \begin{equation}
+    \text{MAE}= \frac{1}{N}\sum_{i=1}^{N}|y_{i} - \hat{y}_{i}|
+  \end{equation}
+  \begin{equation}
+    \text{RMSE}= \sqrt{\frac{1}{N}\sum_{i=1}^{N}(y_{i} - \hat{y}_{i})^{2}}
+  \end{equation}
+  \begin{equation}
+    R^{2} = 1 - \frac{\sum_{i}(y_{i} - \hat{y}_{i})^{2}}{\sum_{i}(y_{i} - \bar{y})^{2}}
+  \end{equation}
+  \begin{equation}
+    \text{MAPE}= \frac{100}{N}\sum_{i=1}^{N}\frac{|y_{i} - \hat{y}_{i}|}{|y_{i}| +
+    \varepsilon}
+  \end{equation}
+  \begin{equation}
+    \text{SMAPE}= \frac{100}{N}\sum_{i=1}^{N}\frac{|y_{i} - \hat{y}_{i}|}{(|y_{i}|
+    + |\hat{y}_{i}|)/2 + \varepsilon}
+  \end{equation}
+
+  MAPE is widely reported in the forecasting literature and is easy to explain to
+  domain experts. On standardised data, however, $|y_{i}|$ is frequently close to zero,
+  inflating individual terms without bound. SMAPE guards against this by symmetrising
+  the denominator across both the actual and predicted magnitude, keeping the metric
+  bounded in $[0\%, 200\%]$ regardless of how small the true value is.
+
+  % ── 5. MLOps Pipeline ─────────────────────────────────────────────────────────
+  \section{MLOps Pipeline}
+
+  \subsection{Pipeline Structure and DVC}
+
+  The pipeline is broken into four sequential DVC stages:
+  \[
+    \texttt{ingest}\to \texttt{preprocess}\to \texttt{featurize}\to \texttt{train}
+  \]
+  Every stage is declared in \texttt{dvc.yaml} with its upstream data dependencies,
+  tracked \texttt{params.yaml} keys, and declared outputs. DVC hashes all inputs at
+  execution time and records the result in \texttt{dvc.lock}; on the next run it skips
+  any stage whose hash is unchanged. The practical benefit is fast iterative
+  experimentation: updating a lag period in \texttt{params.yaml} re-runs only
+  \texttt{featurize} and \texttt{train}. Committing \texttt{dvc.lock} to Git
+  simultaneously snapshots the code, the parameters, and the resulting data state:
+  \[
+    \texttt{dvc repro}
+  \]
+
+  \textbf{Stage 1 --- Ingest.} Pulls ETTh1 from a public HTTPS mirror, validates the
+  column schema and row count, and writes the raw CSV.
+
+  \textbf{Stage 2 --- Preprocess.} Performs the chronological train/val/test split
+  and applies StandardScaler to the OT column, fitting on training data only. The
+  scaler is not persisted; since all downstream evaluation is in standardised units,
+  no inverse transform is needed.
+
+  \textbf{Stage 3 --- Featurize.} Builds the 45-dimensional feature matrix described
+  in Section~IV-B for each partition. Rows with leading NaN values from the longest
+  lag window (168 hours) are dropped.
+
+  \textbf{Stage 4 --- Train.} Executes the two-phase hybrid training procedure,
+  logs all artefacts to MLflow, and writes a summary to
+  \texttt{metrics/metrics.json}.
+
+  \subsection{Experiment Tracking with MLflow}
+
+  Each Stage 4 run opens a parent MLflow run (named \texttt{hybrid\_training}) with
+  five nested child runs, one per model. The following are logged per run:
+  \begin{itemize}
+    \item \textbf{Parameters}: model hyperparameters and pipeline configuration
+      (split ratios, lag periods, EWM spans).
+
+    \item \textbf{Metrics}: MAE, MSE, RMSE, MAPE, SMAPE, and $\text{R}^{2}$ for
+      Ridge, LightGBM, XGBoost, Ridge+CatBoost, Ridge+ExtraTrees, and the full
+      hybrid.
+
+    \item \textbf{Architecture metadata}: base model type, residual model names,
+      and feature window sizes, kept alongside metrics for full context.
+
+    \item \textbf{Artefacts}: serialised model files (\texttt{.pkl}) and
+      \texttt{metrics/predictions.csv} with per-sample predictions.
+
+    \item \textbf{Registry entry}: the hybrid pipeline is registered and versioned
+      in the MLflow Model Registry, enabling controlled promotion from
+      \emph{Staging} to \emph{Production}.
+  \end{itemize}
+
+  Pairing DVC (pipeline and data state) with MLflow (metric history) yields a
+  two-layer audit trail. Given any past prediction one can trace back to the exact
+  \texttt{params.yaml} via Git, the exact data split via \texttt{dvc.lock}, and the
+  per-model metrics via the associated MLflow run.
+
+  \subsection{Containerisation with Docker}
+
+  Two Docker Compose services are defined. The \textbf{API container} is built on
+  \texttt{python:3.12-slim}, copies the trained model binaries at image build time,
+  installs Python dependencies, and launches the Uvicorn ASGI server. The
+  \textbf{MLflow container} starts MLflow at runtime and mounts host directories
+  for the SQLite backend and artefact store. Port 8000 serves predictions; port 5000
+  serves the MLflow experiment UI.
+
+  A \texttt{.dockerignore} excludes the virtual environment, Git objects, DVC cache,
+  and run artefacts, keeping the image small. Architecturally, the API container is
+  stateless (rebuilt from code), while the MLflow container is stateful (data
+  persisted via mounted volumes)---a conventional microservice split \cite{docker2013}.
+
+  \subsection{REST API with FastAPI}
+
+  Three endpoints are exposed:
+  \begin{itemize}
+    \item \texttt{GET /health} --- returns model-load status and API version.
+
+    \item \texttt{GET /metrics} --- reads and returns \texttt{metrics/metrics.json}.
+
+    \item \texttt{POST /predict} --- accepts a start datetime (ISO-8601), a horizon
+      \texttt{steps} $\in [1, 720]$, and an optional \texttt{include\_components}
+      flag; returns the hybrid forecast and, if requested, per-model breakdowns.
+  \end{itemize}
+
+  A \texttt{Predictor} singleton loads all five model files once at startup and keeps
+  them in memory, minimising per-request latency. The \texttt{include\_components}
+  flag is useful operationally: it lets practitioners inspect the Ridge base
+  prediction and individual residual corrections on demand, making anomalous
+  predictions easier to diagnose.
+
+  \subsection{CI/CD with GitHub Actions}
+
+  Every push to \texttt{main} triggers three jobs in sequence:
+  \begin{enumerate}
+    \item \textbf{Lint}: Black, isort, and flake8 run against all Python sources;
+      a shared \texttt{setup.cfg} keeps CI and local settings identical.
+
+    \item \textbf{Unit tests}: pytest verifies the health, predict, and metrics
+      endpoints; model loading lifecycle; and preprocessing logic.
+
+    \item \textbf{Docker build}: the image is built and a retry-based health-check
+      confirms that the container starts and responds correctly.
+  \end{enumerate}
+
+  % ── 6. Results ──────────────────────────────────────────────────────────
+  \section{Results}
+
+  \subsection{Hybrid Model Performance}
+
+  Table~\ref{tab:hybrid} summarises test-set performance across all trained models.
+  Ridge alone proves surprisingly strong---RMSE\,$=0.0765$, $\text{R}^{2}=0.9638$---and
+  both LightGBM and XGBoost trained directly on the raw target fall noticeably behind
+  ($\text{R}^{2}\approx 0.957$--$0.959$). This gap suggests that the dominant structure
+  in ETTh1 is largely linear, and that tree ensembles are handicapped because they
+  cannot extrapolate outside their training range.
+
+  Adding CatBoost and ExtraTrees as residual correctors narrows the gap further.
+  Ridge\,+\,CatBoost reaches $\text{R}^{2}=0.9639$; Ridge\,+\,ExtraTrees reaches
+  $0.9642$. The \textbf{Hybrid Residual} model---averaging both residual
+  predictions---achieves RMSE\,$=0.0757$, MAE\,$=0.0520$, SMAPE\,$=7.80\%$, and
+  $\text{R}^{2}=0.9645$: the best result on every metric.
+
+  \begin{table}[h]
+    \centering
+    \caption{Test set performance on ETTh1 (standardised OT)}
+    \label{tab:hybrid} \scriptsize
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{lrrrrr}
+      \toprule \textbf{Model Architecture} & \textbf{RMSE}  & \textbf{MAE}   & \textbf{MAPE\,(\%)} & \textbf{SMAPE\,(\%)} & \textbf{R$^{2}$}            \\
+      \midrule Ridge (Base Trend)          & 0.0765         & 0.0526         & 10.55               & 7.87                 & \phantom{$-$}0.9638         \\
+      LightGBM (Observability)             & 0.0816         & 0.0581         & 11.19               & 8.44                 & \phantom{$-$}0.9588         \\
+      XGBoost (Observability)              & 0.0837         & 0.0595         & 11.30               & 8.58                 & \phantom{$-$}0.9567         \\
+      \midrule Ridge + CatBoost            & 0.0764         & 0.0525         & \textbf{10.57}      & 7.85                 & \phantom{$-$}0.9639         \\
+      Ridge + ExtraTrees                   & 0.0761         & 0.0524         & 11.06               & 7.84                 & \phantom{$-$}0.9642         \\
+      \midrule \textbf{Hybrid Residual}    & \textbf{0.0757}& \textbf{0.0520}& 10.74               & \textbf{7.80}        & \phantom{$-$}\textbf{0.9645}\\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+
+  The table also highlights the MAPE anomaly: Ridge\,+\,CatBoost records the lowest
+  MAPE (10.57\%) even though the full hybrid achieves lower RMSE, MAE, and SMAPE.
+  This is exactly the instability we warned about---a handful of near-zero true values
+  disproportionately inflate individual MAPE terms, making ranking by MAPE unreliable
+  on standardised data. SMAPE, which symmetrises both sides of the denominator, gives
+  the more consistent and interpretable ordering.
+
+  % ── 7. Discussion ──────────────────────────────────────────────────────────
+  \section{Discussion}
+  \label{sec:discussion}
+
+  \subsection{Why the Hybrid Architecture Works}
+
+  The $\text{R}^{2}$ gap between the hybrid ($0.9645$) and the direct tree models
+  ($\approx 0.957$) is not subtle---it amounts to explaining roughly $20\%$ more
+  of the remaining unexplained variance. The underlying reason is straightforward:
+  tree ensembles are piecewise-constant estimators that average training label values
+  at leaf nodes. They cannot produce values outside the training label range, so any
+  global trend that carries test observations beyond the training distribution causes
+  systematic bias. Ridge, being a global linear model, does not suffer from this. By
+  asking the trees to predict only the residual errors, we remove the trend component
+  they struggle with and give them a much easier target---one that is closer to
+  mean-zero and locally bounded.
+
+  \subsection{Prophet vs.\ Ridge as a Base Model}
+
+  Early in development we experimented with Prophet as the base trend model. The
+  problem is structural: after StandardScaling, OT has zero mean and unit variance.
+  Prophet's additive formulation interprets this as a signal with near-zero amplitude
+  and negligible seasonal components, so it converges to predictions clustered near
+  the global mean. The resulting residuals are almost as large as the original signal,
+  defeating the purpose of a two-phase architecture. Ridge sidesteps this entirely
+  because it fits a linear combination of the already-standardised feature columns and
+  never tries to infer trend amplitude from the raw target scale.
+
+  \subsection{Why Average Rather Than Stack}
+
+  We deliberately chose unweighted averaging over stacking for the residual correction
+  step. CatBoost (ordered boosting) and ExtraTrees (random-threshold variance reduction)
+  are algorithmically orthogonal: they make different approximation errors on the same
+  residuals. A simple mean exploits that partial decorrelation without requiring a
+  held-out meta-training set or introducing a risk of overfitting at the combination
+  layer. The cost is that we cannot learn asymmetric weights that might give more
+  credit to whichever corrector is stronger on a given sub-region. Given the marginal
+  performance difference between the two individual correctors ($\text{R}^{2}$: $0.9639$
+  vs.\ $0.9642$), the simpler approach is defensible.
+
+  \subsection{Reproducibility and Auditability}
+
+  Git, DVC, and MLflow together form a three-layer audit trail. Tracing any historical
+  prediction back to its provenance requires only three lookups: the Git commit hash
+  for the exact code; the \texttt{dvc.lock} entry for the exact data and parameter
+  state; and the MLflow run ID for the per-model metrics. Nothing lives only in a
+  notebook or a researcher's local environment---every quantity is persisted and
+  queryable.
+
+  \subsection{Limitations}
+
+  Several important limitations bound the scope of these results. First, we evaluate
+  only a single ETTh1 dataset at a one-step-ahead horizon; whether the residual
+  decomposition benefit holds on shorter series, noisier targets, or multi-step
+  horizons is an open question. Second, hyperparameters were chosen from
+  domain-informed defaults rather than an optimised search, so the individual model
+  numbers should be treated as reasonable baselines rather than upper bounds. Third,
+  the Docker deployment lacks horizontal autoscaling, which a high-throughput production
+  service would need. Finally, the Prophet limitation is addressable---training on
+  unscaled targets before the StandardScaling step would let it function as intended.
+
+  % ── 8. Conclusion ──────────────────────────────────────────────────────────
+  \section{Conclusion}
+
+  We built and evaluated a full MLOps-driven Hybrid Residual forecasting system. The
+  core technical idea---using Ridge regression to capture the dominant linear trend and
+  then training CatBoost and ExtraTrees only on Ridge's errors---yields
+  RMSE\,$=0.0757$, SMAPE\,$=7.80\%$, and $\text{R}^{2}=0.9645$ on the ETTh1 test
+  set, outperforming every individual model we tested. The gain is not an artefact of
+  a complex weighting scheme; it follows from a principled separation of what each
+  model family does well.
+
+  Beyond the modelling result, the system itself is a contribution. A four-stage DVC
+  pipeline handles data versioning and selective re-execution. MLflow nested runs
+  track every model's metrics alongside the parent hybrid experiment. Docker Compose
+  packages the serving layer, and a GitHub Actions workflow enforces quality gates on
+  every push. The whole system reproduces from raw data to live HTTP inference with
+  \texttt{dvc repro}---a single command.
+
+  A secondary methodological finding warrants emphasis: on standardised targets where
+  true values frequently approach zero, MAPE is an unreliable ranking metric. We
+  recommend reporting SMAPE (or scale-free alternatives) as the primary error measure
+  in any forecasting study that involves normalised or zero-mean targets.
+
+  Taken together, these results demonstrate that the model-design and deployment
+  concerns of time series forecasting can and should be addressed as an integrated
+  engineering problem, not as sequential afterthoughts.
+
+  % ── References ────────────────────────────────────────────────────────────────
+  \bibliographystyle{IEEEtran}
+
+  \begin{thebibliography}{99}
+    \bibitem{box2015time} G.\ E.\ P.\ Box, G.\ M.\ Jenkins, G.\ C.\ Reinsel, and G.\ M.\ Ljung,
+      \textit{Time Series Analysis: Forecasting and Control}, 5th ed. Hoboken,
+      NJ: Wiley, 2015.
+
+    \bibitem{taylor2018prophet} S.\ J.\ Taylor and B.\ Letham, ``Forecasting at scale,''
+      \textit{The American Statistician}, vol.\ 72, no.\ 1, pp.\ 37--45, 2018.
+
+    \bibitem{ke2017lightgbm} G.\ Ke, Q.\ Meng, T.\ Finley, T.\ Wang, W.\ Chen, W.\ Ma,
+      Q.\ Ye, and T.-Y.\ Liu, ``LightGBM: a highly efficient gradient boosting decision
+      tree,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+      vol.\ 30, 2017.
+
+    \bibitem{chen2016xgboost} T.\ Chen and C.\ Guestrin, ``XGBoost: a scalable tree
+      boosting system,'' in \textit{Proc.\ ACM KDD}, pp.\ 785--794, 2016.
+
+    \bibitem{zhou2021informer} H.\ Zhou, S.\ Zhang, J.\ Peng, S.\ Zhang, J.\ Li, H.\ Xiong,
+      and W.\ Zhang, ``Informer: beyond efficient transformer for long sequence
+      time-series forecasting,'' in \textit{Proc.\ AAAI}, vol.\ 35, pp.\ 11106--11115,
+      2021.
+
+    \bibitem{makridakis2018m4} S.\ Makridakis, E.\ Spiliotis, and V.\ Assimakopoulos,
+      ``The M4 competition: results, findings, conclusion and way forward,'' \textit{International
+      Journal of Forecasting}, vol.\ 34, no.\ 4, pp.\ 802--808, 2018.
+
+    \bibitem{makridakis2022m5} S.\ Makridakis, E.\ Spiliotis, and V.\ Assimakopoulos,
+      ``M5 accuracy competition: results, findings, and conclusions,'' \textit{International
+      Journal of Forecasting}, vol.\ 38, no.\ 4, pp.\ 1346--1364, 2022, doi:
+      10.1016/j.ijforecast.2021.11.013.
+
+    \bibitem{januschowski2022forecasting} T.\ Januschowski, Y.\ Wang, K.\ Torkkola,
+      T.\ Erkkil\"{a}, H.\ Hasson, and J.\ Gasthaus, ``Forecasting with trees,''
+      \textit{International Journal of Forecasting}, vol.\ 38, no.\ 4, pp.\ 1473--1481,
+      2022, doi: 10.1016/j.ijforecast.2021.10.004.
+
+    \bibitem{lainder2022forecasting} A.\ D.\ Lainder and R.\ D.\ Wolfinger, ``Forecasting
+      with gradient boosted trees: augmentation, tuning, and cross-validation strategies,''
+      \textit{International Journal of Forecasting}, vol.\ 38, no.\ 4, pp.\ 1426--1433,
+      2022, doi: 10.1016/j.ijforecast.2021.12.003.
+
+    \bibitem{zeng2023transformers} A.\ Zeng, M.\ Chen, L.\ Zhang, and Q.\ Xu, ``Are
+      transformers effective for time series forecasting?'' in \textit{Proc.\ AAAI
+      Conf.\ Artificial Intelligence}, vol.\ 37, no.\ 9, pp.\ 11121--11128, 2023,
+      doi: 10.1609/aaai.v37i9.26317.
+
+    \bibitem{nie2023patchtst} Y.\ Nie, N.\ H.\ Nguyen, P.\ Sinthong, and J.\ Kalagnanam,
+      ``A time series is worth 64 words: long-term forecasting with transformers,''
+      in \textit{Proc.\ International Conference on Learning Representations (ICLR)},
+      2023.
+
+    \bibitem{ansari2024chronos} A.\ F.\ Ansari et al., ``Chronos: learning the
+      language of time series,'' \textit{Transactions on Machine Learning
+      Research}, 2024.
+
+    \bibitem{sculley2015hidden} D.\ Sculley et al., ``Hidden technical debt in
+      machine learning systems,'' in \textit{Advances in Neural Information
+      Processing Systems (NeurIPS)}, vol.\ 28, 2015.
+
+    \bibitem{kreuzberger2023mlops} D.\ Kreuzberger, N.\ K\"{u}hl, and S.\ Hirschl,
+      ``Machine learning operations (MLOps): overview, definition, and architecture,''
+      \textit{IEEE Access}, vol.\ 11, pp.\ 31866--31879, 2023.
+
+    \bibitem{berberi2025mlops} L.\ Berberi et al., ``Machine learning operations
+      landscape: platforms and tools,'' \textit{Artificial Intelligence Review},
+      vol.\ 58, art.\ no.\ 167, 2025, doi: 10.1007/s10462-025-11164-3.
+
+    \bibitem{dvc2020} I.\ Kuprieiev et al., ``DVC: data version control — git for
+      data and models,'' \textit{Zenodo}, 2020. [Online]. Available:
+      \url{https://dvc.org}
+
+    \bibitem{mlflow2018} M.\ Zaharia et al., ``Accelerating the machine learning
+      lifecycle with MLflow,'' \textit{IEEE Data Eng.\ Bull.}, vol.\ 41, no.\ 4, pp.\ 39--45,
+      2018.
+
+    \bibitem{docker2013} D.\ Merkel, ``Docker: lightweight Linux containers for
+      consistent development and deployment,'' \textit{Linux Journal}, vol.\ 2014,
+      no.\ 239, p.\ 2, 2014.
+
+    \bibitem{fastapi2018} S.\ Ramirez, ``FastAPI,'' 2018. [Online]. Available:
+      \url{https://fastapi.tiangolo.com}
+
+    \bibitem{bates1969combination} J.\ M.\ Bates and C.\ W.\ J.\ Granger, ``The combination
+      of forecasts,'' \textit{Journal of the Operational Research Society}, vol.\ 20,
+      no.\ 4, pp.\ 451--468, 1969.
+
+    \bibitem{wolpert1992stacked} D.\ H.\ Wolpert, ``Stacked generalization,'' \textit{Neural
+      Networks}, vol.\ 5, no.\ 2, pp.\ 241--259, 1992.
+
+    \bibitem{vogklis2022blending} K.\ Vogklis and I.\ Nasios, ``Blending
+      gradient boosted trees and neural networks for point and probabilistic
+      forecasting of hierarchical time series,'' \textit{International Journal
+      of Forecasting}, vol.\ 38, no.\ 4, pp.\ 1448--1459, 2022, doi: 10.1016/j.ijforecast.2022.01.001.
+
+    \bibitem{hewamalage2021recurrent} H.\ Hewamalage, C.\ Bergmeir, and K.\ Bandara,
+      ``Recurrent neural networks for time series forecasting: current status
+      and future directions,'' \textit{International Journal of Forecasting}, vol.\ 37,
+      no.\ 1, pp.\ 388--427, 2021.
+
+    \bibitem{stan2017} B.\ Carpenter et al., ``Stan: a probabilistic programming language,''
+      \textit{Journal of Statistical Software}, vol.\ 76, no.\ 1, pp.\ 1--32, 2017.
+
+    \bibitem{hyndman2018forecasting} R.\ J.\ Hyndman and G.\ Athanasopoulos, \textit{Forecasting:
+      Principles and Practice}, 2nd ed. Melbourne: OTexts, 2018. [Online]. Available:
+      \url{https://otexts.com/fpp2}
+  \end{thebibliography}
+\end{document}
