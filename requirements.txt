@@ -1,5 +1,6 @@
 mlflow
 dvc
+fsspec<2024.2.0
 fastapi
 uvicorn[standard]
 httpx
