@@ -1,6 +1,5 @@
 mlflow
 dvc
-fsspec<2024.2.0
 fastapi
 uvicorn[standard]
 httpx
@@ -21,5 +20,3 @@ requests
 pytest
 pytest-cov
 pre-commit
-# Pin antlr4 to avoid omegaconf/hydra version conflict that breaks pytest
-antlr4-python3-runtime==4.13.2
