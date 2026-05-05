@@ -27,6 +27,7 @@ venv/
 .venv/
 env/
 ENV/
+*venv*
 
 # MLflow
 mlruns/

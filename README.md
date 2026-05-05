@@ -14,15 +14,15 @@ A **production-grade MLOps project** demonstrating end-to-end best practices for
 ## Architecture
 
 ```
-┌─────────────┐    ┌──────────────────────────────────────────────────────┐
-│   ETTh1     │───▶│               DVC Pipeline                           │
-│  Dataset    │    │  ingest → preprocess → featurize → train             │
-└─────────────┘    └────────┬──────────────────────────────┬──────────────┘
-                            │                              │
-                     ┌──────▼──────┐              ┌───────▼────────┐
-                     │   MLflow    │              │  Model Pickles  │
-                     │  Tracking   │              │  (5 artifacts)  │
-                     └─────────────┘              └───────┬────────┘
+┌─────────────┐    ┌─────────────────────────────────────────────────────┐
+│   ETTh1     │───▶│               DVC Pipeline                          │
+│  Dataset    │    │  ingest → preprocess → featurize → train            │
+└─────────────┘    └────────┬─────────────────────────────┬──────────────┘
+                            │                             │
+                     ┌──────▼──────┐              ┌───────▼───────┐
+                     │   MLflow    │              │ Model Pickles │
+                     │  Tracking   │              │ (5 artifacts) │
+                     └─────────────┘              └───────┬───────┘
                                                           │
                                                   ┌───────▼────────┐
                                                   │  FastAPI + UV  │
@@ -30,15 +30,29 @@ A **production-grade MLOps project** demonstrating end-to-end best practices for
                                                   └────────────────┘
 ```
 
-### Ensemble Architecture
+### Hybrid Architecture
 
-| Model | Type | Library | Strength |
-|-------|------|---------|----------|
-| ARIMA(2,1,2) | Statistical | statsmodels | Trend + autocorrelation |
-| Prophet | Additive decomposition | prophet | Multi-seasonality + holidays |
-| LightGBM | Gradient boosting | lightgbm | Feature-based, fast |
-| XGBoost | Gradient boosting | xgboost | Feature-based, robust |
-| **Ensemble** | **SLSQP weighted avg** | scipy | **Best of all worlds** |
+| Model | Type | Role | Strength |
+|-------|------|------|----------|
+| Ridge | Linear Regression | Base Trend | Fast, stable baseline |
+| LightGBM | Gradient boosting | Observability | Fast, feature-based |
+| XGBoost | Gradient boosting | Observability | Robust, feature-based |
+| CatBoost | Gradient boosting | Residuals | Finer residual fitting |
+| ExtraTrees | Tree Ensemble | Residuals | Stable variance reduction |
+| **Hybrid** | **Base + Residuals** | **Ensemble** | **Best of all worlds** |
+
+---
+
+## Evaluation Results
+
+Latest test set results (`metrics/metrics.json`):
+
+| Model | MAE | RMSE | MAPE (%) | SMAPE (%) | R² |
+|-------|-----|------|----------|-----------|----|
+| **Hybrid (Ridge + Residuals)** | **0.0519** | **0.0757** | 10.74 | **7.80** | **0.9645** |
+| Ridge | 0.0526 | 0.0765 | **10.55** | 7.87 | 0.9638 |
+| LightGBM | 0.0581 | 0.0816 | 11.19 | 8.44 | 0.9588 |
+| XGBoost | 0.0594 | 0.0837 | 11.30 | 8.58 | 0.9567 |
 
 ---
 
@@ -71,11 +85,11 @@ mlops-pipeline/
 │   ├── features/
 │   │   └── engineering.py      # Lag, rolling, cyclical features
 │   ├── models/
-│   │   ├── arima.py
-│   │   ├── prophet.py
+│   │   ├── linear.py           # Ridge baseline
 │   │   ├── lgbm.py
 │   │   ├── xgboost.py
-│   │   └── ensemble.py         # Weighted avg + Ridge stacking
+│   │   ├── catboost.py
+│   │   └── extra_trees.py      # Tree ensemble
 │   ├── training/
 │   │   └── train.py            # Orchestrator with MLflow tracking
 │   └── evaluation/
@@ -185,13 +199,15 @@ Response:
     {
       "datetime": "2018-06-01T00:00:00",
       "prediction": 3.142,
-      "arima": 3.01,
-      "prophet": 3.22,
-      "lgbm": 3.19,
-      "xgboost": 3.15
+      "ridge": 3.01,
+      "catboost": 0.08,
+      "extra_trees": 0.052
     }
   ],
-  "ensemble_weights": {"arima": 0.18, "prophet": 0.30, "lgbm": 0.26, "xgboost": 0.26}
+  "hybrid_components": {
+    "base": "ridge",
+    "residuals": ["catboost", "extra_trees"]
+  }
 }
 ```
 
@@ -257,8 +273,8 @@ Key parameters:
 |-----------|---------|-------------|
 | `base.horizon` | 24 | Forecast horizon (hours) |
 | `features.lag_periods` | [1,2,3,6,12,24,48,168] | Lag feature periods |
-| `ensemble.method` | `weighted_average` | `simple_average` / `weighted_average` / `stacking` |
-| `arima.p/d/q` | 2/1/2 | ARIMA order |
+| `hybrid.base_model` | `ridge` | Base model for the hybrid architecture |
+| `hybrid.residual_models` | `[catboost, extra_trees]` | Models trained on residuals |
 | `lightgbm.n_estimators` | 500 | Max trees (early stopping) |
 
 ---
@@ -299,12 +315,13 @@ Each `dvc repro` creates a nested MLflow run:
 
 ```
 experiment: mlops-timeseries-ensemble
-  └── run: ensemble_training
-      ├── nested: arima       (params + metrics)
-      ├── nested: prophet     (params + metrics)
+  └── run: hybrid_training
+      ├── nested: ridge       (params + metrics)
+      ├── nested: catboost    (params + metrics)
+      ├── nested: extra_trees (params + metrics)
       ├── nested: lgbm        (params + metrics)
       ├── nested: xgboost     (params + metrics)
-      └── ensemble metrics + weights + artifacts
+      └── hybrid metrics + artifacts
 ```
 
 ---
@@ -313,7 +330,7 @@ experiment: mlops-timeseries-ensemble
 
 | Layer | Technology |
 |-------|-----------|
-| ML Framework | scikit-learn, statsmodels, prophet, lightgbm, xgboost |
+| ML Framework | scikit-learn, statsmodels |
 | Experiment Tracking | MLflow |
 | Data Versioning | DVC |
 | API | FastAPI + Uvicorn |
